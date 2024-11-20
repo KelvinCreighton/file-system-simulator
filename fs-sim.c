@@ -1,22 +1,73 @@
 #include <stdlib.h>
 #include <stdio.h>
 #include <string.h>
+#include <stdint.h>
 
 #define MAX_CMD_ARGS 3          // How many arguments in a line will be counted sparated by spaces
-#define SUPERBLOCK_SIZE 1024    // Bytes
-#define FILE_MAX_SIZE 127       // Blocks (KB)
-#define FILE_NAME_SIZE 5        // Bytes
+#define BLOCK_SIZE 1024         // In bytes
+#define FILE_MAX_SIZE 127       // In blocks (KB)
+#define FILE_NAME_SIZE 5        // In bytes
 
 FILE *disk;
 
 
 void fs_mount(char *new_disk_name) {
-    disk = fopen(new_disk_name, "r");
+    disk = fopen(new_disk_name, "rb");
     if (disk == NULL) {
         printf("Error: File '%s' does not exist.\n", new_disk_name);
         return;
     }
-    printf("done: %s\n", new_disk_name);
+    
+    // Get the superblock
+    unsigned char superblock[BLOCK_SIZE];
+    fread(superblock, 1, BLOCK_SIZE, disk);
+    fclose(disk);
+
+    int error_code = 0;
+    
+    // Skip the free-space list and iterate through every inode
+    for (unsigned int i = 16; i < BLOCK_SIZE; i += 8) {
+        uint64_t inode = *(uint64_t *)(superblock + i);
+        printf("inode: %016lx\n", inode);
+
+        // Error 1: If the state of an inode is free, then all bits in this inode must be zero
+        // Otherwise, the name attribute stored in the inode must have at least one bit that is not zero
+        uint8_t inode_usedSize  = (uint8_t)(inode >> 5*8);
+        printf("inode_usedSize: %08x\n", inode_usedSize);
+        uint8_t inode_state = inode_usedSize & 0x01;
+        printf("inode_state: %08x\n", inode_state);
+        break;
+        /*if (inode_state == 1 && inode != 0) {
+            error_code = 1;
+            break;
+        }*/
+    }
+
+
+
+        // Check consistency of the file system
+    /*
+     * 
+2. The start block of every inode pertaining to a file (i.e. when the directory bit is not set) must have
+a value between 1 and 127 inclusive. Moreover, the size of every inode pertaining to a file must be
+such that its last block is also between 1 and 127.
+
+3. The size and start block of an inode pertaining to a directory (i.e. the directory bit is set) must
+be zero.
+
+4. For every inode, the index of its parent inode cannot be 126. Moreover, if the index of the parent inode
+is between 0 and 125 inclusive, then the parent inode must be in use and marked as a directory.
+
+5. The name of every file/directory must be unique in each directory (not in the entire file system).
+
+6. Blocks that are marked free in the free-space list cannot be allocated to any file. Similarly, blocks that
+are marked in use in the free-space list must be allocated to exactly one file.
+*/
+    if (error_code > 0) {
+        printf("Error: File system in %s is inconsistent (error code: %d)\n", new_disk_name, error_code);
+        return;
+    }
+    printf("Mounted: %s\n", new_disk_name);
 }
 
 void fs_create(char name[5], int size) {}
@@ -31,6 +82,8 @@ void fs_cd(char name[5]) {}
 
 
 int main(int argc, char *argv[]) {
+    printf("================\n\n");
+
     if (argc < 2) {
         printf("No cmds file given\n");
         return 1;
@@ -49,8 +102,6 @@ int main(int argc, char *argv[]) {
             continue;
         // Remove trailing newline character if it exists
         buffer[strcspn(buffer, "\n")] = '\0';
-        printf("------------\n");
-        printf("line: %s\n", buffer);
         // Split the buffer by spaces
         char *tokens[MAX_CMD_ARGS];
         char *token = strtok(buffer, " ");
@@ -63,9 +114,10 @@ int main(int argc, char *argv[]) {
             tokenCount++;
         }
         printf("\n");
-        // Return error if the first token (the command) is not exactly one character in length
+        // Return error if the first token (command) is not exactly one character in length
         if (tokens[0][1] != '\0') {
             printf("Error: unknown command\n");
+            continue;
         }
     
         // Convert the command to lower
@@ -97,6 +149,9 @@ int main(int argc, char *argv[]) {
             default:
                 printf("Error: unknown command\n");
         }
+
+
+        printf("------------\n");
     }
 
     fclose(cmds);     

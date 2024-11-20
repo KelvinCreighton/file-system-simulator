@@ -1,7 +1,1 @@
-M asdf
-m disk0
-c
-m
-
-D
-
+M disk0 
