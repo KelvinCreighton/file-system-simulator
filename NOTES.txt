@@ -1,0 +1,4 @@
+
+
+TODO:
+    - add a method to read commands in from a file. This is important to allow the program to run multiple commands before exiting
