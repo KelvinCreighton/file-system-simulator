@@ -1,18 +1,16 @@
+#include <stdint.h>
+#include "fs-sim.h"
 #include <stdlib.h>
 #include <stdio.h>
 #include <string.h>
-#include <stdint.h>
 
-#define SIZE_OF_BYTE 8          // In bits
-#define MAX_CMD_ARGS 3          // How many arguments in a line will be counted, sparated by spaces
-#define FREE_SPACE_LIST_SIZE 16 // In bytes
-#define INODE_SIZE 8            // In bytes
-#define BLOCK_SIZE 1024         // In bytes
-#define FILE_MAX_SIZE 127       // In blocks (KB)
-#define FILE_NAME_SIZE 5        // In bytes
+#define MAX_CMD_ARGS 3          // How many arguments in a line will be counted
+#define FREE_BLOCK_LIST_SIZE 16 // bytes
+#define INODES_LENGTH 126       // count
+#define BLOCK_SIZE 1024         // bytes
 
 FILE *disk;
-
+Superblock *superblock;
 
 void fs_mount(char *new_disk_name) {
     disk = fopen(new_disk_name, "rb");
@@ -22,76 +20,94 @@ void fs_mount(char *new_disk_name) {
     }
     
     // Get the superblock
-    char superblock[BLOCK_SIZE];
-    fread(superblock, 1, BLOCK_SIZE, disk);
+    char buffer[BLOCK_SIZE];
+    fread(buffer, 1, BLOCK_SIZE, disk);
     fclose(disk);
-
+    // Create superblock struct
+    superblock = malloc(sizeof(Superblock));
+    memcpy(superblock->free_block_list, buffer, FREE_BLOCK_LIST_SIZE);
+    size_t inodes_offset = FREE_BLOCK_LIST_SIZE;
+    size_t inodes_size = sizeof(superblock->inode);
+    memcpy(superblock->inode, buffer + inodes_offset, inodes_size);
+    
     // Check consistency of the file system
     int error_code = 0;
-    
-    // Skip the free-space list and iterate through every inode
-    for (unsigned int i = FREE_SPACE_LIST_SIZE; i < BLOCK_SIZE; i += INODE_SIZE) {
-        uint64_t inode = *(uint64_t *)(superblock + i);
-        printf("inode: %016lx\n", inode);
-
+    for (unsigned int i = 0; i < INODES_LENGTH; i++) {
+        Inode inode = superblock->inode[i];
+        // inode not in use
+        if (*(uint64_t *)&inode == 0) {
+            continue;
+        }
+        printf("---- i = %d ----\n", i);
+        printf("inode: %016lx\n", *(uint64_t *)&inode);
+        
         // Error 1: If the state of an inode is free, then all bits in this inode must be zero
         // Otherwise, the name attribute stored in the inode must have at least one bit that is not zero
-        uint8_t inode_usedSize = (uint8_t)(inode >> 5*SIZE_OF_BYTE);
-        printf("inode_usedSize: %02x\n", inode_usedSize);
-        uint8_t inode_state = inode_usedSize & 0x80;    // Get the first bit
+        printf("inode_usedSize: %02x\n", inode.used_size);
+        uint8_t inode_state = inode.used_size >> 7;  // Get the first bit
         printf("inode_state: %02x\n", inode_state);
-        if (inode_state == 0 && inode != 0) {
+        if (inode_state == 0) {
             error_code = 1;
             break;
         }
-        uint64_t inode_name = inode & 0x000000FFFFFFFFFF;
-        printf("inode_name: %010lx\n", inode_name);
-        if (inode_state == 1 && inode_name == 0) {
-            error_code = 1;
-            break;
+        // print name
+        printf("inode_name: ");
+        for (int j = 0; j < 5; j++) {
+            char letter = inode.name[j];
+            if (letter == '\0')
+                break;
+            printf("%c", letter);
         }
+        printf("\n");
 
+        if (inode_state == 1 && inode.name[0] == 0) {
+            error_code = 1;
+            break;
+        }
 
         // Error 2: The start block of every inode pertaining to a file (i.e. when the directory bit is not set) must have a value between 1 and 127 inclusive
         // Moreover, the size of every inode pertaining to a file must be such that its last block is also between 1 and 127
-        uint8_t inode_startBlock = (uint8_t)(inode >> 6*SIZE_OF_BYTE);
-        printf("inode_startBlock: %02x\n", inode_startBlock);
-        if (inode_startBlock < 1 || inode_startBlock > 127) {
+        printf("inode_startBlock: %02x\n", inode.start_block);
+        if (inode.start_block < 1 || inode.start_block > 127) {
             error_code = 2;
             break;
         }
-        uint8_t inode_size = inode_usedSize & 0x7F;     // Get all 7 bits except the first
+        uint8_t inode_size = inode.used_size & 0x7F;    // Remove the first bit
         printf("inode_size: %02x\n", inode_size);
-        printf("end block: %d\n", inode_startBlock+inode_size-1);
-        if (inode_startBlock+inode_size-1 > 127) {
+        printf("end block: %d\n", inode.start_block+inode_size-1);
+        if (inode.start_block+inode_size-1 > 127) {
             error_code = 2;
             break;
         }
 
         // Error 3: The size and start block of an inode pertaining to a directory (i.e. the directory bit is set) must be zero
-        uint8_t inode_dirParent = (uint8_t)(inode >> 7*SIZE_OF_BYTE);
-        printf("inode_dirParent: %02x\n", inode_dirParent);
-        uint8_t inode_type = inode_dirParent & 0x80;    // Get the first bit
+        printf("inode_dirParent: %02x\n", inode.dir_parent);
+        uint8_t inode_type = inode.dir_parent >> 7;    // Get the first bit
         printf("inode_type: %02x\n", inode_type);
-        if (inode_type != 0 && inode_size > 0) {
+        if (inode_type == 1 && inode_size > 0) {
             error_code = 3;
             break;
         }
 
         // Error 4: For every inode, the index of its parent inode cannot be 126
         // Moreover, if the index of the parent inode is between 0 and 125 inclusive, then the parent inode must be in use and marked as a directory
-        uint8_t inode_parent = inode_dirParent & 0x7F;  // Get all 7 bits except the first
+        uint8_t inode_parent = inode.dir_parent & 0x7F;    // Remove the first bit
         printf("inode_parent: %02x\n", inode_parent);
         if (inode_parent == 126) {
             error_code = 4;
             break;
         }
-        uint64_t parent_inode = *(uint64_t *)(superblock+FREE_SPACE_LIST_SIZE + inode_parent*SIZE_OF_BYTE);
-        printf("parent_inode: %016lx\n", parent_inode);
-
-        break;
+        Inode parent_inode = superblock->inode[inode_parent];
+        printf("parent_inode: %016lx\n", *(uint64_t *)&parent_inode);
+        uint8_t parent_inode_state = parent_inode.used_size >> 7;  // Get the first bit
+        printf("parent_inode_state: %02x\n", parent_inode_state);
+        uint8_t parent_inode_type = parent_inode.dir_parent >> 7;  // Get the first bit
+        printf("parent_inode_type: %02x\n", parent_inode_type);
+        if (parent_inode_state == 0 || parent_inode_type == 0) {
+            error_code = 4;
+            break;
+        }
     }
-
 
     /*
      * 
@@ -107,7 +123,25 @@ are marked in use in the free-space list must be allocated to exactly one file.
     printf("\nMounted: %s\n", new_disk_name);
 }
 
-void fs_create(char name[5], int size) {}
+
+void fs_create(char name[5], int size) {
+    printf("name: %s\n", name);
+    printf("size: %d\n", size);
+   
+    // Check for an available inode
+    int inodeAvailable = 0;
+    for (unsigned int i = 0; i < INODES_LENGTH; i++) {
+        // inode not in use
+        if (*(int64_t *)&superblock->inode[i] == 0) {
+            inodeAvailable = 1;
+            break;
+        }
+    }
+    if (!inodeAvailable) {
+        printf("Error: Superblock in disk <disk name> is full, cannot create <file name>");
+    }
+       
+}
 void fs_delete(char name[5]) {}
 void fs_read(char name[5], int block_num) {}
 void fs_write(char name[5], int block_num) {}
@@ -170,7 +204,7 @@ int main(int argc, char *argv[]) {
                 }
                 fs_mount(tokens[1]);
                 break;
-
+            // --------------------------------
             case 'c':
                 if (tokenCount < 2) {
                     printf("No file name given\n");
@@ -180,10 +214,25 @@ int main(int argc, char *argv[]) {
                     printf("No file size given\n");
                     break;
                 }
-                
-                printf("case: create\n");
+                int size = 0;
+                int invalid = 0;
+                // Convert token to integer
+                for (int i = 0; i < 3; i++) {
+                    if (tokens[2][i] == '\0')
+                        break;
+                    if (tokens[2][i] < 48 || tokens[2][i] > 57) {
+                        printf("Error: invalid character: '%c'\n", tokens[2][i]);
+                        invalid = 1;
+                        break;
+                    }
+                    size *= 10;
+                    size += (int)(tokens[2][i]-48);
+                }
+                if (invalid)
+                    break;
+                fs_create(tokens[1], size);
                 break;
-
+            // --------------------------------
             default:
                 printf("Error: unknown command\n");
         }
