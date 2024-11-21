@@ -3,7 +3,10 @@
 #include <string.h>
 #include <stdint.h>
 
+#define SIZE_OF_BYTE 8          // In bits
 #define MAX_CMD_ARGS 3          // How many arguments in a line will be counted, sparated by spaces
+#define FREE_SPACE_LIST_SIZE 16 // In bytes
+#define INODE_SIZE 8            // In bytes
 #define BLOCK_SIZE 1024         // In bytes
 #define FILE_MAX_SIZE 127       // In blocks (KB)
 #define FILE_NAME_SIZE 5        // In bytes
@@ -27,48 +30,71 @@ void fs_mount(char *new_disk_name) {
     int error_code = 0;
     
     // Skip the free-space list and iterate through every inode
-    for (unsigned int i = 16; i < BLOCK_SIZE; i += 8) {
+    for (unsigned int i = FREE_SPACE_LIST_SIZE; i < BLOCK_SIZE; i += INODE_SIZE) {
         uint64_t inode = *(uint64_t *)(superblock + i);
         printf("inode: %016lx\n", inode);
 
         // Error 1: If the state of an inode is free, then all bits in this inode must be zero
         // Otherwise, the name attribute stored in the inode must have at least one bit that is not zero
-        uint8_t inode_usedSize = (uint8_t)(inode >> 5*8);
+        uint8_t inode_usedSize = (uint8_t)(inode >> 5*SIZE_OF_BYTE);
         printf("inode_usedSize: %02x\n", inode_usedSize);
         uint8_t inode_state = inode_usedSize & 0x80;    // Get the first bit
         printf("inode_state: %02x\n", inode_state);
+        if (inode_state == 0 && inode != 0) {
+            error_code = 1;
+            break;
+        }
         uint64_t inode_name = inode & 0x000000FFFFFFFFFF;
-        printf("inode_name: %016lx\n", inode_name);
-
-        if ( (inode_state == 0 && inode != 0) || (inode_state == 1 && inode_name == 0) ) {
+        printf("inode_name: %010lx\n", inode_name);
+        if (inode_state == 1 && inode_name == 0) {
             error_code = 1;
             break;
         }
 
+
         // Error 2: The start block of every inode pertaining to a file (i.e. when the directory bit is not set) must have a value between 1 and 127 inclusive
-        // Moreover, the size of every inode pertaining to a file must be such that its last block is also between 1 and 127.
-        
-        uint8_t inode_startBlock = (uint8_t)(inode >> 6*8);
+        // Moreover, the size of every inode pertaining to a file must be such that its last block is also between 1 and 127
+        uint8_t inode_startBlock = (uint8_t)(inode >> 6*SIZE_OF_BYTE);
         printf("inode_startBlock: %02x\n", inode_startBlock);
-        uint8_t inode_size = inode_usedSize & 0x7F;     // Get all 7 bits except the first
-        printf("inode_size: %02x\n", inode_size);
-        printf("end block: %d\n", inode_startBlock+inode_size-1);
-        if ( (inode_startBlock < 1 || inode_startBlock > 127) || (inode_startBlock+inode_size-1 > 127) ) {
+        if (inode_startBlock < 1 || inode_startBlock > 127) {
             error_code = 2;
             break;
         }
+        uint8_t inode_size = inode_usedSize & 0x7F;     // Get all 7 bits except the first
+        printf("inode_size: %02x\n", inode_size);
+        printf("end block: %d\n", inode_startBlock+inode_size-1);
+        if (inode_startBlock+inode_size-1 > 127) {
+            error_code = 2;
+            break;
+        }
+
+        // Error 3: The size and start block of an inode pertaining to a directory (i.e. the directory bit is set) must be zero
+        uint8_t inode_dirParent = (uint8_t)(inode >> 7*SIZE_OF_BYTE);
+        printf("inode_dirParent: %02x\n", inode_dirParent);
+        uint8_t inode_type = inode_dirParent & 0x80;    // Get the first bit
+        printf("inode_type: %02x\n", inode_type);
+        if (inode_type != 0 && inode_size > 0) {
+            error_code = 3;
+            break;
+        }
+
+        // Error 4: For every inode, the index of its parent inode cannot be 126
+        // Moreover, if the index of the parent inode is between 0 and 125 inclusive, then the parent inode must be in use and marked as a directory
+        uint8_t inode_parent = inode_dirParent & 0x7F;  // Get all 7 bits except the first
+        printf("inode_parent: %02x\n", inode_parent);
+        if (inode_parent == 126) {
+            error_code = 4;
+            break;
+        }
+        uint64_t parent_inode = *(uint64_t *)(superblock+FREE_SPACE_LIST_SIZE + inode_parent*SIZE_OF_BYTE);
+        printf("parent_inode: %016lx\n", parent_inode);
+
         break;
     }
 
 
     /*
      * 
-3. The size and start block of an inode pertaining to a directory (i.e. the directory bit is set) must
-be zero.
-
-4. For every inode, the index of its parent inode cannot be 126. Moreover, if the index of the parent inode
-is between 0 and 125 inclusive, then the parent inode must be in use and marked as a directory.
-
 5. The name of every file/directory must be unique in each directory (not in the entire file system).
 
 6. Blocks that are marked free in the free-space list cannot be allocated to any file. Similarly, blocks that
@@ -78,7 +104,7 @@ are marked in use in the free-space list must be allocated to exactly one file.
         printf("Error: File system in %s is inconsistent (error code: %d)\n", new_disk_name, error_code);
         return;
     }
-    printf("Mounted: %s\n", new_disk_name);
+    printf("\nMounted: %s\n", new_disk_name);
 }
 
 void fs_create(char name[5], int size) {}
@@ -144,6 +170,7 @@ int main(int argc, char *argv[]) {
                 }
                 fs_mount(tokens[1]);
                 break;
+
             case 'c':
                 if (tokenCount < 2) {
                     printf("No file name given\n");
