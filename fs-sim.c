@@ -82,7 +82,7 @@ void fs_mount(char *new_disk_name) {
 
         // Error 3: The size and start block of an inode pertaining to a directory (i.e. the directory bit is set) must be zero
         printf("inode_dirParent: %02x\n", inode.dir_parent);
-        uint8_t inode_type = inode.dir_parent >> 7;    // Get the first bit
+        uint8_t inode_type = inode.dir_parent & 0x80;    // Get the first bit
         printf("inode_type: %02x\n", inode_type);
         if (inode_type == 1 && inode_size > 0) {
             error_code = 3;
@@ -99,9 +99,9 @@ void fs_mount(char *new_disk_name) {
         }
         Inode parent_inode = superblock->inode[inode_parent];
         printf("parent_inode: %016lx\n", *(uint64_t *)&parent_inode);
-        uint8_t parent_inode_state = parent_inode.used_size >> 7;  // Get the first bit
+        uint8_t parent_inode_state = parent_inode.used_size & 0x80;  // Get the first bit
         printf("parent_inode_state: %02x\n", parent_inode_state);
-        uint8_t parent_inode_type = parent_inode.dir_parent >> 7;  // Get the first bit
+        uint8_t parent_inode_type = parent_inode.dir_parent & 0x80;  // Get the first bit
         printf("parent_inode_type: %02x\n", parent_inode_type);
         if (parent_inode_state == 0 || parent_inode_type == 0) {
             error_code = 4;
@@ -140,7 +140,7 @@ void fs_create(char name[5], int size) {
     if (!inodeAvailable) {
         printf("Error: Superblock in disk <disk name> is full, cannot create <file name>");
     }
-       
+    
 }
 void fs_delete(char name[5]) {}
 void fs_read(char name[5], int block_num) {}
