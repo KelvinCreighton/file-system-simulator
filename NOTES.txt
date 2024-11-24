@@ -6,11 +6,13 @@ HELPFUL INFO:
 TODO:
     - add a method to read commands in from a file. This is important to allow the program to run multiple commands before exiting
     - change the printfs to proper error handling output to stderr
+    - add back Werror to Makefile
 
 
 QUESITONS:
     - does "first bit" mean in little or big endian
     - can we assume there will be no padding issues since the structures match the correct number of bytes
+    - can we assume that bit shifting will always fill with 0s unless otherwise specified?
 
 ANSWERS:
     

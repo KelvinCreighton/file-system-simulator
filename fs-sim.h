@@ -10,6 +10,18 @@ typedef struct {
 	Inode inode[126];
 } Superblock;
 
+typedef struct Filenames_node {
+    char name[5];
+    struct Filenames_node *next;
+} Filenames_node;
+
+typedef struct {
+    char *name;
+    FILE *data;
+    Superblock *superblock;
+    Filenames_node *filenames[126];     // Track the unique filenames in a directory at index i (max parents + root = 126)
+} Disk;
+
 void fs_mount(char *new_disk_name);
 void fs_create(char name[5], int size);
 void fs_delete(char name[5]);
@@ -20,3 +32,5 @@ void fs_ls(void);
 void fs_resize(char name[5], int new_size);
 void fs_defrag(void);
 void fs_cd(char name[5]);
+
+unsigned int str_to_uint(char *str, unsigned int length);
