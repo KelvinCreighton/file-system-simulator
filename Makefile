@@ -1,5 +1,5 @@
 CC = gcc
-CFLAGS = -Wall -Werror -pthread -g
+CFLAGS = -Wall -pthread -g
 OBJ = fs-sim.o
 
 EXEC = fs

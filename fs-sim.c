@@ -8,7 +8,6 @@
 #define MAX_CMD_ARGS 3          // How many arguments in a line will be counted
 #define BLOCK_SIZE 1024         // bytes
 #define FREE_BLOCK_LIST_SIZE 16 // bytes
-#define MAX_PARENTS 125         // count
 #define INODES_LENGTH 126       // count
 #define INODE_SIZE 8            // bytes
 #define FILENAME_LENGTH 5       // bytes
@@ -18,7 +17,7 @@ Disk *disk;
 void show_filenames() {
     printf("---- filenames ----\n");
     Filenames_node *node;
-    for (unsigned int i = 0; i < MAX_PARENTS; i++) {
+    for (unsigned int i = 0; i < INODES_LENGTH+1; i++) {
         node = disk->filenames[i];
         if (disk->filenames[i] == NULL)
             continue;
@@ -85,7 +84,7 @@ void fs_mount(char *new_disk_name) {
     memcpy(superblock->free_block_list, buffer, FREE_BLOCK_LIST_SIZE);
     disk->superblock = superblock;
     // Set the pointer for all filenames_node in each directory to null
-    for (unsigned int i = 0; i < MAX_PARENTS+1; i++) {
+    for (unsigned int i = 0; i < INODES_LENGTH+1; i++) {
         disk->filenames[i] = NULL;
     }
 
@@ -185,15 +184,16 @@ void fs_mount(char *new_disk_name) {
         uint8_t filename_index = inode_parent;
         if (filename_index == 127)    // Set root to 126 for filenames
             filename_index = 126;
+        printf("filename_index: %d\n", filename_index);
         // Create and organize the filenames list to track which are used for uniqueness
         Filenames_node *new_node = malloc(sizeof(Filenames_node));
         strncpy(new_node->name, inode->name, FILENAME_LENGTH);
         new_node->next = NULL;
-        if (disk->filenames[i] == NULL) { // Add the new filename if it is the first in the parent
-            disk->filenames[i] = new_node;
+        if (disk->filenames[filename_index] == NULL) { // Add the new filename if it is the first in the parent
+            disk->filenames[filename_index] = new_node;
         } else {    // Otherwise cycle through the linked list checking for uniqueness and then appending to the end if it is unique
-            Filenames_node *node = disk->filenames[inode_parent];
-            if (strcmp(node->name, inode->name) == 0) {
+            Filenames_node *node = disk->filenames[filename_index];
+            if (strncmp_case(node->name, inode->name, FILENAME_LENGTH) == 0) {
                 error_code = 5;
                 break;
             }
@@ -225,14 +225,14 @@ are marked in use in the free-space list must be allocated to exactly one file.
 
 
 void fs_create(char name[5], int size) {
-    /*printf("name: %s\n", name);
+    printf("name: %s\n", name);
     printf("size: %d\n", size);
    
     // Check for an available inode
-    int inodeAvailable = 0;
+    /*int inodeAvailable = 0;
     for (unsigned int i = 0; i < INODES_LENGTH; i++) {
         // inode not in use
-        if (*(int64_t *)&superblock->inode[i] == 0) {
+        if (disk->superblock->inode[i].used_size & 0x80 == 0) {
             inodeAvailable = 1;
             break;
         }
@@ -264,6 +264,18 @@ unsigned int str_to_uint(char *str, unsigned int length) {
         size += (int)(str[i]-48);
     }
     return size;
+}
+
+// 0 for success (like strncmp) and 1 for failure
+int strncmp_case(const char *s1, const char *s2, unsigned int n) {
+    for (unsigned int i = 0; i < n; i++) {
+        // Convert both to lower
+        char c1 = s1[i] >= 65 && s1[i] <= 90 ? s1[i]+32 : s1[i];
+        char c2 = s2[i] >= 65 && s2[i] <= 90 ? s2[i]+32 : s2[i];
+        if (c1 != c2)
+            return 1;
+    }
+    return 0;
 }
 
 

@@ -1,8 +1,8 @@
 typedef struct {
 	char name[5];        // Name of the file/directory (not necessarily null terminated)
-	uint8_t used_size;   // State of inode and size of the file/directory
+	uint8_t used_size;   // State of inode (0 = free) and size of the file/directory
 	uint8_t start_block; // Index of the first block of the file/directory
-	uint8_t dir_parent;  // Type of inode and index of the parent inode
+	uint8_t dir_parent;  // Type of inode (0 = file) and index of the parent inode
 } Inode;
 
 typedef struct {
@@ -12,6 +12,8 @@ typedef struct {
 
 typedef struct Filenames_node {
     char name[5];
+    //struct DirectoryTree_node *parent;
+    //struct DirectoryTree_node *
     struct Filenames_node *next;
 } Filenames_node;
 
@@ -19,7 +21,7 @@ typedef struct {
     char *name;
     FILE *data;
     Superblock *superblock;
-    Filenames_node *filenames[126];     // Track the unique filenames in a directory at index i (max parents + root = 126)
+    Filenames_node *filenames[127];     // Track the unique filenames in a directory at index i (max parents + root = 127)
 } Disk;
 
 void fs_mount(char *new_disk_name);
@@ -34,3 +36,4 @@ void fs_defrag(void);
 void fs_cd(char name[5]);
 
 unsigned int str_to_uint(char *str, unsigned int length);
+int strncmp_case(const char *s1, const char *s2, unsigned int n);
