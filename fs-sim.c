@@ -76,12 +76,12 @@ void fs_mount(char *new_disk_name) {
     disk = malloc(sizeof(Disk));
     disk->data = fopen(new_disk_name, "rb");
     if (disk->data == NULL) {
-        printf("Error: File '%s' does not exist.\n", new_disk_name);
+        fprintf(stderr, "Error: File '%s' does not exist.\n", new_disk_name);
         return;
     }
     disk->name = malloc(strlen(new_disk_name)+1);
     strcpy(disk->name, new_disk_name);
-    disk->current_dir = 127;
+    disk->current_dir = 126;
     
     // Get the superblock
     char buffer[BLOCK_SIZE];
@@ -202,27 +202,20 @@ void fs_mount(char *new_disk_name) {
             filename_index = 126;
         printf("filename_index: %d\n", filename_index);
         // Create and organize the filenames list to track which are used for uniqueness
-        Filenames_node *new_node = malloc(sizeof(Filenames_node));
-        memcpy(new_node->name, inode->name, FILENAME_LENGTH);
-        new_node->next = NULL;
-        if (disk->filenames[filename_index] == NULL) { // Add the new filename if it is the first in the parent
-            disk->filenames[filename_index] = new_node;
-        } else {    // Otherwise cycle through the linked list checking for uniqueness and then appending to the end if it is unique
-            Filenames_node *node = disk->filenames[filename_index];
+        Filenames_node *node = disk->filenames[filename_index];
+        while (node != NULL) {
             if (strncmp_case(node->name, inode->name, FILENAME_LENGTH) == 0) {
                 error_code = 5;
                 break;
             }
-            while (node->next != NULL) {
-                if (strcmp(node->next->name, inode->name) == 0) {
-                    error_code = 5;
-                    break;
-                }
-                node = node->next;
-            }
-            node->next = new_node;
+            node = node->next;
         }
-    }
+        // Append the new filename to the head of the list
+        Filenames_node *new_node = malloc(sizeof(Filenames_node));
+        memcpy(new_node->name, inode->name, FILENAME_LENGTH); 
+        new_node->next = disk->filenames[filename_index];
+        disk->filenames[filename_index] = new_node;
+   }
     
     printf("\n");
     show_filenames();
@@ -233,10 +226,10 @@ void fs_mount(char *new_disk_name) {
 are marked in use in the free-space list must be allocated to exactly one file.
 */
     if (error_code > 0) {
-        printf("Error: File system in %s is inconsistent (error code: %d)\n", new_disk_name, error_code);
+        fprintf(stderr, "Error: File system in %s is inconsistent (error code: %d)\n", new_disk_name, error_code);
         return;
     }
-    printf("\nMounted: %s\n", new_disk_name);
+    fprintf(stderr, "\nMounted: %s\n", new_disk_name);
 }
 
 
@@ -257,16 +250,59 @@ void fs_create(char name[5], int size) {
         }
     }
     if (!inodeAvailable) {
-        printf("Error: Superblock in disk <disk name> is full, cannot create <file name>");
+        fprintf(stderr, "Error: Superblock in disk %s is full, cannot create %s\n", disk->name, name);
+        return;
     }
     
     // Check uniqueness of new file to the files in the current directory
-    /*Filenames_node *filenames = disk->filenames[disk->current_dir];
-    while (filenames != NULL) {
-        if (strncmp_case(filenames->name, name, FILENAME_LENGTH)) {
-
+    if ( (name[0] == '.' && name[1] == '\0') || (name[0] == '.' && name[1] == '.' && name[2] == '\0') ) {
+       fprintf(stderr, "Error: File or directory %s already exists\n", name);
+       return;
+    }
+    Filenames_node *node = disk->filenames[disk->current_dir];
+    while (node != NULL) {
+        if (strncmp_case(node->name, name, FILENAME_LENGTH) == 0) {
+            fprintf(stderr, "Error: File or directory %s already exists\n", name);
+            return;
         }
-    }*/
+        node = node->next;
+    }
+
+    // Append the new filename to the head of the list
+    Filenames_node *new_node = malloc(sizeof(Filenames_node));
+    memcpy(new_node->name, name, FILENAME_LENGTH);
+    new_node->next = disk->filenames[disk->current_dir];
+    disk->filenames[disk->current_dir] = new_node;
+    
+    // Ensure there are enough available blocks by checking the superblock
+    int contiguous_count = 0;
+    uint8_t start = 0;
+    for (unsigned int i = 0; i < FREE_BLOCK_LIST_SIZE; i++) {   // Iterate through each byte
+        for (unsigned int j = 0; j < 8; j++) {  // Iterate throug each bit
+            uint8_t bit = disk->superblock->free_block_list[i] >> j & 0x01;
+            printf("[%d] bit: %x\n", i*8+j, bit);
+            if (bit == 0) {
+                if (contiguous_count == 0) {
+                    start = i*8 + j;
+                }
+                contiguous_count++;
+            } else {
+                contiguous_count = 0;
+            }
+            if (contiguous_count == size) {
+                break;
+            }
+        }
+        if (contiguous_count == size) {
+            break;
+        }
+    }
+
+    if (contiguous_count == size) {
+        printf("start: %d\n", start);
+    } else {
+        printf("NOT\n");
+    }
 }
 
 void fs_delete(char name[5]) {}
@@ -300,7 +336,6 @@ void trim_name(char name[5]) {
     // Handle trailing spaces
     int end = FILENAME_LENGTH-1;
     while (end >= 0 && (name[end] == ' ' || name[end] == '\0')) {
-        printf("end: %d\n", end);
         name[end] = '\0';
         end--;
     }
@@ -337,13 +372,13 @@ int main(int argc, char *argv[]) {
     printf("================\n\n");
 
     if (argc < 2) {
-        printf("No cmds file given\n");
+        fprintf(stderr, "Error: No cmds file given\n");
         return 1;
     }
 
     FILE *cmds = fopen(argv[1], "r");
     if (cmds == NULL) {
-        printf("Error: reading cmds file\n");
+        fprintf(stderr, "Error: reading cmds file\n");
         return 1;
     }
 
@@ -368,7 +403,7 @@ int main(int argc, char *argv[]) {
         printf("\n");
         // Return error if the first token (command) is not exactly one character in length
         if (tokens[0][1] != '\0') {
-            printf("Error: unknown command\n");
+            fprintf(stderr, "Error: unknown command\n");
             continue;
         }
     
@@ -379,7 +414,7 @@ int main(int argc, char *argv[]) {
         switch (tokens[0][0]) {
             case 'm':
                 if (tokenCount < 2) {
-                    printf("No disk name given\n");
+                    fprintf(stderr, "No disk name given\n");
                     break;
                 }
                 fs_mount(tokens[1]);
@@ -387,16 +422,16 @@ int main(int argc, char *argv[]) {
             // --------------------------------
             case 'c':
                 if (tokenCount < 2) {
-                    printf("No file name given\n");
+                    fprintf(stderr, "No file name given\n");
                     break;
                 }
                 if (tokenCount < 3) {
-                    printf("No file size given\n");
+                    fprintf(stderr, "No file size given\n");
                     break;
                 }
                 unsigned int size = str_to_uint(tokens[2], 3);
                 if (size == -1) {
-                    printf("Error: size\n");
+                    fprintf(stderr, "Error: size\n");
                 }
                 // Create a name of size 5 and copy token[1] argument filling the rest of the spaces with \0
                 char name[FILENAME_LENGTH];
@@ -413,7 +448,7 @@ int main(int argc, char *argv[]) {
                 break;
             // --------------------------------
             default:
-                printf("Error: unknown command\n");
+                fprintf(stderr, "Error: unknown command\n");
         }
 
 

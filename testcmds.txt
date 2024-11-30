@@ -1,2 +1,2 @@
 M disk0 
-C cool 12
+C cool 14
