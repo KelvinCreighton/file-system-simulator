@@ -12,8 +12,6 @@ typedef struct {
 
 typedef struct Filenames_node {
     char name[5];
-    //struct DirectoryTree_node *parent;
-    //struct DirectoryTree_node *
     struct Filenames_node *next;
 } Filenames_node;
 
@@ -21,6 +19,7 @@ typedef struct {
     char *name;
     FILE *data;
     Superblock *superblock;
+    uint8_t current_dir;                // Root = 126
     Filenames_node *filenames[127];     // Track the unique filenames in a directory at index i (max parents + root = 127)
 } Disk;
 
@@ -37,3 +36,4 @@ void fs_cd(char name[5]);
 
 unsigned int str_to_uint(char *str, unsigned int length);
 int strncmp_case(const char *s1, const char *s2, unsigned int n);
+void trim_name(char name[5]);

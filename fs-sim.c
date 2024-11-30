@@ -23,7 +23,15 @@ void show_filenames() {
             continue;
         printf("[%03d]->", i);
         while (node != NULL) {
-            printf("[%s]->", node->name);
+            printf("[");
+            for (unsigned int j = 0; j < FILENAME_LENGTH; j++) {
+                if (node->name[j] == '\0') {
+                    printf("\\0");
+                } else {
+                    printf("%c", node->name[j]);
+                }
+            }
+            printf("]->");
             node = node->next;
         }
         printf("[NULL]\n");
@@ -73,6 +81,7 @@ void fs_mount(char *new_disk_name) {
     }
     disk->name = malloc(strlen(new_disk_name)+1);
     strcpy(disk->name, new_disk_name);
+    disk->current_dir = 127;
     
     // Get the superblock
     char buffer[BLOCK_SIZE];
@@ -95,6 +104,7 @@ void fs_mount(char *new_disk_name) {
         unsigned int inode_offset = FREE_BLOCK_LIST_SIZE + i*INODE_SIZE;
         Inode *inode = malloc(sizeof(Inode));
         memcpy(inode->name, buffer + inode_offset, FILENAME_LENGTH);
+        trim_name(inode->name);
         inode->used_size = *(uint8_t *)(buffer + inode_offset + FILENAME_LENGTH);
         inode->start_block = *(uint8_t *)(buffer + inode_offset + FILENAME_LENGTH+1);
         inode->dir_parent = *(uint8_t *)(buffer + inode_offset + FILENAME_LENGTH+2);
@@ -127,7 +137,13 @@ void fs_mount(char *new_disk_name) {
             error_code = 1;
             break;
         }
-        if (inode_state != 0 && inode->name[0] == 0) {
+        int name_empty = 1;
+        for (unsigned int j = 0; j < FILENAME_LENGTH; j++) {
+            if (inode->name[j] != '\0') {
+                name_empty = 0;
+            }
+        }
+        if (inode_state != 0 && name_empty) {
             error_code = 1;
             break;
         }
@@ -187,7 +203,7 @@ void fs_mount(char *new_disk_name) {
         printf("filename_index: %d\n", filename_index);
         // Create and organize the filenames list to track which are used for uniqueness
         Filenames_node *new_node = malloc(sizeof(Filenames_node));
-        strncpy(new_node->name, inode->name, FILENAME_LENGTH);
+        memcpy(new_node->name, inode->name, FILENAME_LENGTH);
         new_node->next = NULL;
         if (disk->filenames[filename_index] == NULL) { // Add the new filename if it is the first in the parent
             disk->filenames[filename_index] = new_node;
@@ -225,24 +241,34 @@ are marked in use in the free-space list must be allocated to exactly one file.
 
 
 void fs_create(char name[5], int size) {
-    printf("name: %s\n", name);
+    printf("name: ");
+    for (int i = 0; i < FILENAME_LENGTH; i++) {
+        printf("%02x", name[i]);
+    }
+    printf(" | %s\n", name);
     printf("size: %d\n", size);
    
-    // Check for an available inode
-    /*int inodeAvailable = 0;
+    int inodeAvailable = 0;
     for (unsigned int i = 0; i < INODES_LENGTH; i++) {
         // inode not in use
-        if (disk->superblock->inode[i].used_size & 0x80 == 0) {
+        if ( (disk->superblock->inode[i].used_size & 0x80) == 0) {
             inodeAvailable = 1;
             break;
         }
     }
     if (!inodeAvailable) {
         printf("Error: Superblock in disk <disk name> is full, cannot create <file name>");
+    }
+    
+    // Check uniqueness of new file to the files in the current directory
+    /*Filenames_node *filenames = disk->filenames[disk->current_dir];
+    while (filenames != NULL) {
+        if (strncmp_case(filenames->name, name, FILENAME_LENGTH)) {
+
+        }
     }*/
-    
-    
 }
+
 void fs_delete(char name[5]) {}
 void fs_read(char name[5], int block_num) {}
 void fs_write(char name[5], int block_num) {}
@@ -250,7 +276,35 @@ void fs_buff(char buff[1024]) {}
 void fs_ls(void) {}
 void fs_resize(char name[5], int new_size) {}
 void fs_defrag(void) {}
-void fs_cd(char name[5]) {}
+void fs_cd(char name[5]) {
+    // loop through all inodes comparing the names and checking if the parent matches the current directory
+}
+
+void trim_name(char name[5]) {
+    // Handle leading spaces
+    int start = 0;
+    while (start < FILENAME_LENGTH && name[start] == ' ') {
+        start++;
+    }
+    
+    if (start > 0) {
+        for (int i = start; i < FILENAME_LENGTH; i++) {
+            name[i-start] = name[i];
+        }
+        // Set the rest to \0
+        for (int i = FILENAME_LENGTH-start; i < FILENAME_LENGTH; i++) {
+            name[i] = ' ';
+        }
+    }
+
+    // Handle trailing spaces
+    int end = FILENAME_LENGTH-1;
+    while (end >= 0 && (name[end] == ' ' || name[end] == '\0')) {
+        printf("end: %d\n", end);
+        name[end] = '\0';
+        end--;
+    }
+}
 
 unsigned int str_to_uint(char *str, unsigned int length) {
     unsigned int size = 0;
@@ -321,7 +375,6 @@ int main(int argc, char *argv[]) {
         // Convert the command to lower
         if (tokens[0][0] >= 65 && tokens[0][0] <= 90)
             tokens[0][0] += 32;
-    
         // Run the function specified by the second argument
         switch (tokens[0][0]) {
             case 'm':
@@ -345,7 +398,18 @@ int main(int argc, char *argv[]) {
                 if (size == -1) {
                     printf("Error: size\n");
                 }
-                fs_create(tokens[1], size);
+                // Create a name of size 5 and copy token[1] argument filling the rest of the spaces with \0
+                char name[FILENAME_LENGTH];
+                int reached_end_of_arg = 0;
+                for (unsigned int i = 0; i < FILENAME_LENGTH; i++) {
+                    if (tokens[1][i] == '\0')
+                        reached_end_of_arg = 1;
+                    if (reached_end_of_arg)
+                        name[i] = '\0';
+                    else
+                        name[i] = tokens[1][i];
+                }
+                fs_create(name, size);
                 break;
             // --------------------------------
             default:
