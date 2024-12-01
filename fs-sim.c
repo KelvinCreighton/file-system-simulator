@@ -241,15 +241,15 @@ void fs_create(char name[5], int size) {
     printf(" | %s\n", name);
     printf("size: %d\n", size);
    
-    int inodeAvailable = 0;
+    int inodeAvailable = -1;
     for (unsigned int i = 0; i < INODES_LENGTH; i++) {
         // inode not in use
         if ( (disk->superblock->inode[i].used_size & 0x80) == 0) {
-            inodeAvailable = 1;
+            inodeAvailable = i;
             break;
         }
     }
-    if (!inodeAvailable) {
+    if (inodeAvailable == -1) {
         fprintf(stderr, "Error: Superblock in disk %s is full, cannot create %s\n", disk->name, name);
         return;
     }
@@ -267,6 +267,36 @@ void fs_create(char name[5], int size) {
         }
         node = node->next;
     }
+ 
+    // If its a file, ensure there are enough available blocks by checking the superblock
+    uint8_t start_block = 0;
+    if (size > 0) {
+        int contiguous_count = 0;
+        for (unsigned int i = 0; i < FREE_BLOCK_LIST_SIZE; i++) {   // Iterate through each byte
+            for (unsigned int j = 0; j < 8; j++) {  // Iterate throug each bit
+                uint8_t bit = disk->superblock->free_block_list[i] >> j & 0x01;
+                if (bit == 0) {
+                    if (contiguous_count == 0) {
+                        start_block = i*8 + j;
+                    }
+                    contiguous_count++;
+                } else {
+                    contiguous_count = 0;
+                }
+                if (contiguous_count == size) {
+                    break;
+                }
+            }
+            if (contiguous_count == size) {
+                break;
+            }
+        }
+
+        if (contiguous_count != size) {
+            fprintf(stderr, "Error: Cannot allocate %d blocks on %s\n", size, name);
+            return;
+        }
+    }
 
     // Append the new filename to the head of the list
     Filenames_node *new_node = malloc(sizeof(Filenames_node));
@@ -274,35 +304,39 @@ void fs_create(char name[5], int size) {
     new_node->next = disk->filenames[disk->current_dir];
     disk->filenames[disk->current_dir] = new_node;
     
-    // Ensure there are enough available blocks by checking the superblock
-    int contiguous_count = 0;
-    uint8_t start = 0;
-    for (unsigned int i = 0; i < FREE_BLOCK_LIST_SIZE; i++) {   // Iterate through each byte
-        for (unsigned int j = 0; j < 8; j++) {  // Iterate throug each bit
-            uint8_t bit = disk->superblock->free_block_list[i] >> j & 0x01;
-            printf("[%d] bit: %x\n", i*8+j, bit);
-            if (bit == 0) {
-                if (contiguous_count == 0) {
-                    start = i*8 + j;
-                }
-                contiguous_count++;
-            } else {
-                contiguous_count = 0;
-            }
-            if (contiguous_count == size) {
-                break;
-            }
-        }
-        if (contiguous_count == size) {
-            break;
-        }
+    // Create the inode for the file
+    Inode *inode = malloc(sizeof(Inode));
+    memcpy(inode->name, name, FILENAME_LENGTH);
+    inode->used_size = 0x80 | size;
+    inode->start_block = start_block;
+    inode->dir_parent = disk->current_dir;
+    if (disk->current_dir == 126)
+        inode->dir_parent += 1;
+    if (size == 0)
+        inode->dir_parent |= 0x80;
+    
+    printf("\n");
+    show_inode(inode);
+   
+
+    FILE *file = fopen(disk->name, "r+b");
+    // Write the allocated blocks to the free_block_list space
+    char buffer[FREE_BLOCK_LIST_SIZE];
+    fread(buffer, 1, FREE_BLOCK_LIST_SIZE, file);
+    int buffer_index = start_block/8;
+    int bit_offset = start_block%8;
+    for (int i = 0; i < size; i++) {
+       buffer[buffer_index] |= 1 << bit_offset;
+       bit_offset++;
+       if (bit_offset == 8) {
+           bit_offset = 0;
+           buffer_index++;
+       }
     }
 
-    if (contiguous_count == size) {
-        printf("start: %d\n", start);
-    } else {
-        printf("NOT\n");
-    }
+    fseek(file, 0, SEEK_SET); // Go back to the beginning of the file
+    fwrite(buffer, 1, FREE_BLOCK_LIST_SIZE, file);
+    fclose(file);
 }
 
 void fs_delete(char name[5]) {}
