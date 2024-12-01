@@ -269,7 +269,7 @@ void fs_create(char name[5], int size) {
     }
  
     // If its a file, ensure there are enough available blocks by checking the superblock
-    uint8_t start_block = 0;
+    uint8_t start_block = -1;
     if (size > 0) {
         int contiguous_count = 0;
         for (unsigned int i = 0; i < FREE_BLOCK_LIST_SIZE; i++) {   // Iterate through each byte
@@ -297,6 +297,7 @@ void fs_create(char name[5], int size) {
             return;
         }
     }
+    start_block += 1;   // Shift to 1 to 127 leaving 0 reservd for directory
 
     // Append the new filename to the head of the list
     Filenames_node *new_node = malloc(sizeof(Filenames_node));
@@ -311,31 +312,46 @@ void fs_create(char name[5], int size) {
     inode->start_block = start_block;
     inode->dir_parent = disk->current_dir;
     if (disk->current_dir == 126)
-        inode->dir_parent += 1;
-    if (size == 0)
-        inode->dir_parent |= 0x80;
+        inode->dir_parent = 127;    // Set to 127 (actual root) if current dir is 126 (root)
+    if (size == 0)    // If the inode is a directory
+        inode->dir_parent |= 0x80;  // State it as a directory in the dir_parent variable
+
     
     printf("\n");
     show_inode(inode);
    
 
     FILE *file = fopen(disk->name, "r+b");
-    // Write the allocated blocks to the free_block_list space
-    char buffer[FREE_BLOCK_LIST_SIZE];
-    fread(buffer, 1, FREE_BLOCK_LIST_SIZE, file);
-    int buffer_index = start_block/8;
-    int bit_offset = start_block%8;
-    for (int i = 0; i < size; i++) {
-       buffer[buffer_index] |= 1 << bit_offset;
-       bit_offset++;
-       if (bit_offset == 8) {
-           bit_offset = 0;
-           buffer_index++;
-       }
+
+    // Write the allocated blocks to the free_block_list space if its a file
+    if (size > 0) {
+        char buffer[BLOCK_SIZE];
+        fread(buffer, 1, BLOCK_SIZE, file);
+        int start_index = start_block - 1;
+        int buffer_index = start_index/8;
+        int bit_offset = start_index%8;
+        for (int i = 0; i < size; i++) {
+           buffer[buffer_index] |= 1 << bit_offset;
+           bit_offset++;
+           if (bit_offset == 8) {
+               bit_offset = 0;
+               buffer_index++;
+           }
+        }
+        fseek(file, 0, SEEK_SET);                       // Go back to the beginning of the file
+        fwrite(buffer, 1, FREE_BLOCK_LIST_SIZE, file);  // Write the buffer back with the new values
     }
 
-    fseek(file, 0, SEEK_SET); // Go back to the beginning of the file
-    fwrite(buffer, 1, FREE_BLOCK_LIST_SIZE, file);
+    // Write the new inode to the superblock
+    char inode_buffer[8];
+    memcpy(inode_buffer, inode->name, FILENAME_LENGTH);
+    inode_buffer[5] = inode->used_size;
+    inode_buffer[6] = inode->start_block;
+    inode_buffer[7] = inode->dir_parent;
+    unsigned int inode_offset = 16 + inodeAvailable*8;
+    fseek(file, inode_offset, SEEK_SET);  // Go to the inode in the superblock
+    fwrite(inode_buffer, 1, INODE_SIZE, file);
+
     fclose(file);
 }
 
