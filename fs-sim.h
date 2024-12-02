@@ -19,8 +19,8 @@ typedef struct {
     char *name;
     FILE *data;
     Superblock *superblock;
-    uint8_t current_dir;                // Root = 126
-    Filenames_node *filenames[127];     // Track the unique filenames in a directory at index i (max parents + root = 127)
+    uint8_t current_dir;                // Root = 127
+    Filenames_node *filenames[128];     // Track the unique filenames in a directory at index i (max parents + root = 127)
 } Disk;
 
 void fs_mount(char *new_disk_name);
