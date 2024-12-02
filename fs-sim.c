@@ -17,7 +17,7 @@ Disk *disk;
 void show_filenames() {
     printf("---- filenames ----\n");
     Filenames_node *node;
-    for (unsigned int i = 0; i < INODES_LENGTH+1; i++) {
+    for (unsigned int i = 0; i < INODES_LENGTH+2; i++) {
         node = disk->filenames[i];
         if (disk->filenames[i] == NULL)
             continue;
@@ -81,7 +81,7 @@ void fs_mount(char *new_disk_name) {
     }
     disk->name = malloc(strlen(new_disk_name)+1);
     strcpy(disk->name, new_disk_name);
-    disk->current_dir = 126;
+    disk->current_dir = 127;
     
     // Get the superblock
     char buffer[BLOCK_SIZE];
@@ -197,12 +197,8 @@ void fs_mount(char *new_disk_name) {
         }
         
         // Error 5: The name of every file/directory must be unique in each directory (not in the entire file system).
-        uint8_t filename_index = inode_parent;
-        if (filename_index == 127)    // Set root to 126 for filenames
-            filename_index = 126;
-        printf("filename_index: %d\n", filename_index);
         // Create and organize the filenames list to track which are used for uniqueness
-        Filenames_node *node = disk->filenames[filename_index];
+        Filenames_node *node = disk->filenames[inode_parent];
         while (node != NULL) {
             if (strncmp_case(node->name, inode->name, FILENAME_LENGTH) == 0) {
                 error_code = 5;
@@ -213,8 +209,8 @@ void fs_mount(char *new_disk_name) {
         // Append the new filename to the head of the list
         Filenames_node *new_node = malloc(sizeof(Filenames_node));
         memcpy(new_node->name, inode->name, FILENAME_LENGTH); 
-        new_node->next = disk->filenames[filename_index];
-        disk->filenames[filename_index] = new_node;
+        new_node->next = disk->filenames[inode_parent];
+        disk->filenames[inode_parent] = new_node;
    }
     
     printf("\n");
@@ -235,12 +231,11 @@ are marked in use in the free-space list must be allocated to exactly one file.
 
 void fs_create(char name[5], int size) {
     printf("name: ");
-    for (int i = 0; i < FILENAME_LENGTH; i++) {
-        printf("%02x", name[i]);
-    }
-    printf(" | %s\n", name);
+    printf("%.5s\n", name);
     printf("size: %d\n", size);
    
+
+
     int inodeAvailable = -1;
     for (unsigned int i = 0; i < INODES_LENGTH; i++) {
         // inode not in use
@@ -250,31 +245,32 @@ void fs_create(char name[5], int size) {
         }
     }
     if (inodeAvailable == -1) {
-        fprintf(stderr, "Error: Superblock in disk %s is full, cannot create %s\n", disk->name, name);
+        fprintf(stderr, "Error: Superblock in disk %s is full, cannot create %.5s\n", disk->name, name);
         return;
     }
     
     // Check uniqueness of new file to the files in the current directory
     if ( (name[0] == '.' && name[1] == '\0') || (name[0] == '.' && name[1] == '.' && name[2] == '\0') ) {
-       fprintf(stderr, "Error: File or directory %s already exists\n", name);
+       fprintf(stderr, "Error: File or directory %.5s already exists\n", name);
        return;
     }
     Filenames_node *node = disk->filenames[disk->current_dir];
     while (node != NULL) {
         if (strncmp_case(node->name, name, FILENAME_LENGTH) == 0) {
-            fprintf(stderr, "Error: File or directory %s already exists\n", name);
+            fprintf(stderr, "Error: File or directory %.5s already exists\n", name);
             return;
         }
         node = node->next;
     }
  
     // If its a file, ensure there are enough available blocks by checking the superblock
-    uint8_t start_block = -1;
+    uint8_t start_block = 0;
     if (size > 0) {
         int contiguous_count = 0;
+        int start_bit = 1;     // Skip the first bit when starting the iterations
         for (unsigned int i = 0; i < FREE_BLOCK_LIST_SIZE; i++) {   // Iterate through each byte
-            for (unsigned int j = 0; j < 8; j++) {  // Iterate throug each bit
-                uint8_t bit = disk->superblock->free_block_list[i] >> j & 0x01;
+            for (unsigned int j = start_bit; j < 8; j++) {  // Iterate throug each bit
+                uint8_t bit = disk->superblock->free_block_list[i] << j & 0x80;
                 if (bit == 0) {
                     if (contiguous_count == 0) {
                         start_block = i*8 + j;
@@ -290,14 +286,14 @@ void fs_create(char name[5], int size) {
             if (contiguous_count == size) {
                 break;
             }
+            start_bit = 0;
         }
 
         if (contiguous_count != size) {
-            fprintf(stderr, "Error: Cannot allocate %d blocks on %s\n", size, name);
+            fprintf(stderr, "Error: Cannot allocate %d blocks on %.5s\n", size, name);
             return;
         }
     }
-    start_block += 1;   // Shift to 1 to 127 leaving 0 reservd for directory
 
     // Append the new filename to the head of the list
     Filenames_node *new_node = malloc(sizeof(Filenames_node));
@@ -311,8 +307,6 @@ void fs_create(char name[5], int size) {
     inode->used_size = 0x80 | size;
     inode->start_block = start_block;
     inode->dir_parent = disk->current_dir;
-    if (disk->current_dir == 126)
-        inode->dir_parent = 127;    // Set to 127 (actual root) if current dir is 126 (root)
     if (size == 0)    // If the inode is a directory
         inode->dir_parent |= 0x80;  // State it as a directory in the dir_parent variable
 
@@ -327,11 +321,10 @@ void fs_create(char name[5], int size) {
     if (size > 0) {
         char buffer[BLOCK_SIZE];
         fread(buffer, 1, BLOCK_SIZE, file);
-        int start_index = start_block - 1;
-        int buffer_index = start_index/8;
-        int bit_offset = start_index%8;
+        int buffer_index = start_block/8;
+        int bit_offset = start_block%8;
         for (int i = 0; i < size; i++) {
-           buffer[buffer_index] |= 1 << bit_offset;
+           buffer[buffer_index] |= 0x80 >> bit_offset;
            bit_offset++;
            if (bit_offset == 8) {
                bit_offset = 0;
@@ -359,11 +352,81 @@ void fs_delete(char name[5]) {}
 void fs_read(char name[5], int block_num) {}
 void fs_write(char name[5], int block_num) {}
 void fs_buff(char buff[1024]) {}
-void fs_ls(void) {}
+
+void fs_ls(void) {
+    // Print the current dir and the parent dir
+    unsigned int current_dir_count = 0;
+    unsigned int parent_dir_count = 0;
+    int parent_dir = -1;
+    if (disk->current_dir != 127)
+        parent_dir = disk->superblock->inode[disk->current_dir].dir_parent & 0x7f;
+    for (unsigned int i = 0; i < INODES_LENGTH; i++) {
+        if ( (disk->superblock->inode[i].dir_parent & 0x7f) == disk->current_dir) {
+            current_dir_count++;
+        }
+        if (parent_dir != -1 && (disk->superblock->inode[i].dir_parent & 0x7f) == parent_dir) {
+            parent_dir_count++;
+        }
+    }
+    if (parent_dir == -1)
+        parent_dir_count = current_dir_count;
+
+    printf(".     %3d\n", current_dir_count);
+    printf("..    %3d\n", parent_dir_count);
+    
+
+
+    Inode *inode;
+    for (unsigned int i = 0; i < INODES_LENGTH; i++) {
+        inode = &disk->superblock->inode[i];
+        if ( (inode->dir_parent & 0x7f) == disk->current_dir) {
+            printf("%-5.5s", inode->name);
+            if ( (inode->dir_parent & 0x80) == 0) {// If it is type file print the file size
+                printf(" %3d KB\n", inode->used_size & 0x7f);
+            } else {                               // If it is type dir print the number of children
+                unsigned int child_count = 0;
+                for (unsigned int j = 0; j < INODES_LENGTH; j++) {
+                    if ( (disk->superblock->inode[j].dir_parent & 0x7f) == i) {
+                        child_count++;
+                    }
+                 }
+                 printf(" %3d\n", child_count);
+            }
+        }
+    }
+}
+
 void fs_resize(char name[5], int new_size) {}
 void fs_defrag(void) {}
+
 void fs_cd(char name[5]) {
-    // loop through all inodes comparing the names and checking if the parent matches the current directory
+    // Skip cd into '.'
+    if (name[0] == '.' && name[1] == '\0')
+        return;
+    // Skip cd into '..' if the current directory is root otherwise go up one level
+    if (name[0] == '.' && name[1] == '.' && name[2] == '\0') {
+        if (disk->current_dir == 127) {
+            return;
+        } else {
+            uint8_t parent_dir = disk->superblock->inode[disk->current_dir].dir_parent;
+            disk->current_dir = parent_dir & 0x7f;
+            return;
+        }
+    }
+
+    Inode *inode;
+    for (unsigned int i = 0; i < INODES_LENGTH; i++) {
+        inode = &disk->superblock->inode[i];
+        int isParent = (inode->dir_parent & 0x7f) == disk->current_dir;
+        int sameName = strncmp_case(inode->name, name, FILENAME_LENGTH) == 0;
+        if (isParent && sameName) {
+           disk->current_dir = i;
+           printf("new dir: %d\n", i);
+           return;
+        }
+    }
+
+    fprintf(stderr, "Error: Directory %.5s does not exist\n", name);
 }
 
 void trim_name(char name[5]) {
@@ -408,6 +471,10 @@ unsigned int str_to_uint(char *str, unsigned int length) {
 // 0 for success (like strncmp) and 1 for failure
 int strncmp_case(const char *s1, const char *s2, unsigned int n) {
     for (unsigned int i = 0; i < n; i++) {
+        if (s1[i] == '\0' && s2[i] == '\0')
+            return 0;
+        if (s1[i] == '\0' || s2[i] == '\0')
+            return 1;
         // Convert both to lower
         char c1 = s1[i] >= 65 && s1[i] <= 90 ? s1[i]+32 : s1[i];
         char c2 = s2[i] >= 65 && s2[i] <= 90 ? s2[i]+32 : s2[i];
@@ -416,7 +483,6 @@ int strncmp_case(const char *s1, const char *s2, unsigned int n) {
     }
     return 0;
 }
-
 
 int main(int argc, char *argv[]) {
     printf("================\n\n");
@@ -483,18 +549,24 @@ int main(int argc, char *argv[]) {
                 if (size == -1) {
                     fprintf(stderr, "Error: size\n");
                 }
-                // Create a name of size 5 and copy token[1] argument filling the rest of the spaces with \0
-                char name[FILENAME_LENGTH];
-                int reached_end_of_arg = 0;
-                for (unsigned int i = 0; i < FILENAME_LENGTH; i++) {
-                    if (tokens[1][i] == '\0')
-                        reached_end_of_arg = 1;
-                    if (reached_end_of_arg)
-                        name[i] = '\0';
-                    else
-                        name[i] = tokens[1][i];
+                // Create a name of size 5 and copy token[1] argument filling the rest of the spaces with \0 
+                char create_name[FILENAME_LENGTH] = {0};
+                strncpy(create_name, tokens[1], FILENAME_LENGTH);
+                fs_create(create_name, size);
+                break;
+            // --------------------------------
+            case 'l':
+                fs_ls();
+                break;
+            // --------------------------------
+            case 'y':
+                if (tokenCount < 2) {
+                    fprintf(stderr, "No filename given\n");
+                    break;
                 }
-                fs_create(name, size);
+                char cd_name[FILENAME_LENGTH] = {0};
+                strncpy(cd_name, tokens[1], FILENAME_LENGTH);
+                fs_cd(cd_name);
                 break;
             // --------------------------------
             default:

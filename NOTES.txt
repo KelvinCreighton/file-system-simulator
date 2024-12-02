@@ -4,6 +4,7 @@ HELPFUL INFO:
 
 
 TODO:
+    - FIX THE ISSUE WHERE 2 FILES CANNOT BE CREATED AT ONCE
     - add back Werror to Makefile
 
 
