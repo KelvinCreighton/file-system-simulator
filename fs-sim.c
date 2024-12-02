@@ -290,7 +290,7 @@ void fs_create(char name[5], int size) {
         }
 
         if (contiguous_count != size) {
-            fprintf(stderr, "Error: Cannot allocate %d blocks on %.5s\n", size, name);
+            fprintf(stderr, "Error: Cannot allocate %d blocks on %s\n", size, disk->name);
             return;
         }
     }
@@ -309,7 +309,7 @@ void fs_create(char name[5], int size) {
     inode->dir_parent = disk->current_dir;
     if (size == 0)    // If the inode is a directory
         inode->dir_parent |= 0x80;  // State it as a directory in the dir_parent variable
-
+    disk->superblock->inode[inodeAvailable] = *inode;
     
     printf("\n");
     show_inode(inode);
