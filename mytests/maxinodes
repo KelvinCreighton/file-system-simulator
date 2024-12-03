@@ -1,3 +1,5 @@
+"Error: Superblock in disk disk0 is full, cannot create LF"
+
 M disk0
 C AA 0 
 C BA 0 
@@ -125,3 +127,5 @@ C HF 0
 C IF 0 
 C JF 0 
 C KF 0 
+C LF 0
+
