@@ -5,7 +5,6 @@
 
 #include "fs-sim.h"
 
-#define MAX_CMD_ARGS 3          // How many arguments in a line will be counted
 #define BLOCK_SIZE 1024         // bytes
 #define FREE_BLOCK_LIST_SIZE 16 // bytes
 #define INODES_LENGTH 126       // count
@@ -388,6 +387,11 @@ void fs_read(char name[5], int block_num) {
 }
 
 void fs_write(char name[5], int block_num) {
+    if ( (name[0] == '.' && name[1] == '\0') || (name[0] == '.' && name[1] == '.' && name[2]== '\0') ) {
+        fprintf(stderr, "Error: File %.5s does not exist\n", name);
+        return;
+    }
+
     // Find the inode
     int inode_index = -1;
     Inode inode;
@@ -395,7 +399,8 @@ void fs_write(char name[5], int block_num) {
         inode = disk->superblock->inode[i];
         int isParent = (inode.dir_parent & 0x7f) == disk->current_dir;
         int sameName = strncmp_case(inode.name, name, FILENAME_LENGTH) == 0;
-        if (isParent && sameName) {
+        int isFile = (inode.dir_parent & 0x80) == 0;
+        if (isParent && sameName && isFile) {
             inode_index = i;
             break;
         }
@@ -483,7 +488,55 @@ void fs_ls(void) {
     }
 }
 
-void fs_resize(char name[5], int new_size) {}
+void fs_resize(char name[5], int new_size) {
+    if ( (name[0] == '.' && name[1] == '\0') || (name[0] == '.' && name[1] == '.' && name[2]== '\0') ) {
+        fprintf(stderr, "Error: File %.5s does not exist\n", name);
+        return;
+    }
+
+    // Find the inode
+    int inode_index = -1;
+    Inode *inode;
+    for (unsigned int i = 0; i < INODES_LENGTH; i++) {
+        inode = &disk->superblock->inode[i];
+        int isParent = (inode->dir_parent & 0x7f) == disk->current_dir;
+        int sameName = strncmp_case(inode->name, name, FILENAME_LENGTH) == 0;
+        int isFile = (inode->dir_parent & 0x80) == 0;
+        if (isParent && sameName && isFile) {
+            inode_index = i;
+            break;
+        }
+    }
+    if (inode_index == -1) {
+        fprintf(stderr, "Error: File %.5s does not exist\n", name);
+        return;
+    }
+    
+    int current_size = inode->used_size & 0x7f;
+    // If new_size is less than the current inode size
+    if (new_size < current_size) {
+        // Zero out the tailing blocks
+        FILE *file = fopen(disk->name, "r+b");
+        unsigned int seek_offset = BLOCK_SIZE*inode->start_block + BLOCK_SIZE*new_size;
+        uint8_t clearDisk_buff[1024] = {0};
+        for (unsigned int i = 1; i <= current_size-new_size; i++) {
+            seek_offset += BLOCK_SIZE*i;
+            printf("seek_offset: %d\n", seek_offset);
+            fseek(file, seek_offset, SEEK_SET);
+            fwrite(clearDisk_buff, 1, BLOCK_SIZE, file);
+        }
+        fclose(file);
+        // Resize in the free block list
+
+        // Set the inodes size to the new size
+
+    }
+    // If new_size is greater than current inode size
+    else if (new_size > current_size) {
+
+    }
+}
+
 void fs_defrag(void) {}
 
 void fs_cd(char name[5]) {
@@ -585,7 +638,7 @@ int main(int argc, char *argv[]) {
         return 1;
     }
 
-    char buffer[256];
+    char buffer[2048];
     while (fgets(buffer, sizeof(buffer), cmds) != NULL) {
         // Skip any line that is only a newline
         if (buffer[0] == '\n')
@@ -593,11 +646,11 @@ int main(int argc, char *argv[]) {
         // Remove trailing newline character if it exists
         buffer[strcspn(buffer, "\n")] = '\0';
         // Split the buffer by spaces
-        char *tokens[MAX_CMD_ARGS];
+        char *tokens[1024];
         char *token = strtok(buffer, " ");
         int tokenCount = 0;
         printf("tokens: ");
-        while (token != NULL && tokenCount < MAX_CMD_ARGS) {
+        while (token != NULL) {
             printf("%s, ", token);
             tokens[tokenCount] = token;
             token = strtok(NULL, " ");
@@ -693,6 +746,25 @@ int main(int argc, char *argv[]) {
             // --------------------------------
             case 'l':
                 fs_ls();
+                break;
+            // --------------------------------
+            case 'e':
+                if (tokenCount < 2) {
+                    fprintf(stderr, "No filename given\n");
+                    break;
+                }
+                if (tokenCount < 3) {
+                    fprintf(stderr, "No new size given\n");
+                    break;
+                }
+                unsigned int new_size = str_to_uint(tokens[2], 3);
+                if (new_size == -1) {
+                    fprintf(stderr, "Error: newsize\n");
+                    break;
+                }
+                char resize_name[FILENAME_LENGTH] = {0};
+                strncpy(resize_name, tokens[1], FILENAME_LENGTH);
+                fs_resize(resize_name, new_size);
                 break;
             // --------------------------------
             case 'y':
