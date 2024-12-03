@@ -74,8 +74,8 @@ void show_inode(Inode *inode) {
 
 void fs_mount(char *new_disk_name) {
     disk = malloc(sizeof(Disk));
-    disk->data = fopen(new_disk_name, "rb");
-    if (disk->data == NULL) {
+    FILE *file = fopen(new_disk_name, "rb");
+    if (file == NULL) {
         fprintf(stderr, "Error: File '%s' does not exist.\n", new_disk_name);
         return;
     }
@@ -85,8 +85,8 @@ void fs_mount(char *new_disk_name) {
     
     // Get the superblock
     char buffer[BLOCK_SIZE];
-    fread(buffer, 1, BLOCK_SIZE, disk->data);
-    fclose(disk->data);
+    fread(buffer, 1, BLOCK_SIZE, file);
+    fclose(file);
 
     // Create superblock struct
     Superblock *superblock = malloc(sizeof(Superblock));
@@ -349,9 +349,96 @@ void fs_create(char name[5], int size) {
 }
 
 void fs_delete(char name[5]) {}
-void fs_read(char name[5], int block_num) {}
-void fs_write(char name[5], int block_num) {}
-void fs_buff(char buff[1024]) {}
+
+void fs_read(char name[5], int block_num) {
+    // Find the inode
+    int inode_index = -1;
+    Inode inode;
+    for (unsigned int i = 0; i < INODES_LENGTH; i++) {
+        inode = disk->superblock->inode[i];
+        int isParent = (inode.dir_parent & 0x7f) == disk->current_dir;
+        int sameName = strncmp_case(inode.name, name, FILENAME_LENGTH) == 0;
+        if (isParent && sameName) {
+            inode_index = i;
+            break;
+        }
+    }
+    if (inode_index == -1) {
+        fprintf(stderr, "Error: File %.5s does not exist\n", name);
+        return;
+    }
+    
+    printf("used size: %02x\n", inode.used_size & 0x7f);
+    printf("block_num: %d\n", block_num);
+    // Find the block in the inode
+    if (block_num > (inode.used_size & 0x7f)-1) {
+        fprintf(stderr, "Error: %.5s does not have block %d\n", name, block_num);
+        return;
+    }
+
+    // Read the block in the inode
+    FILE *file = fopen(disk->name, "rb");
+    uint8_t buff[BLOCK_SIZE] = {0};
+    unsigned int seek_offset = BLOCK_SIZE*inode.start_block + BLOCK_SIZE*block_num;
+    printf("seek_offset: %d\n", seek_offset);
+    fseek(file, seek_offset, SEEK_SET);
+    fread(buff, 1, BLOCK_SIZE, file);
+    fclose(file);
+    fs_buff(buff);
+}
+
+void fs_write(char name[5], int block_num) {
+    // Find the inode
+    int inode_index = -1;
+    Inode inode;
+    for (unsigned int i = 0; i < INODES_LENGTH; i++) {
+        inode = disk->superblock->inode[i];
+        int isParent = (inode.dir_parent & 0x7f) == disk->current_dir;
+        int sameName = strncmp_case(inode.name, name, FILENAME_LENGTH) == 0;
+        if (isParent && sameName) {
+            inode_index = i;
+            break;
+        }
+    }
+    if (inode_index == -1) {
+        fprintf(stderr, "Error: File %.5s does not exist\n", name);
+        return;
+    }
+    
+    printf("used size: %02x\n", inode.used_size & 0x7f);
+    printf("block_num: %d\n", block_num);
+    // Find the block in the inode
+    if (block_num > (inode.used_size & 0x7f)-1) {
+        fprintf(stderr, "Error: %.5s does not have block %d\n", name, block_num);
+        return;
+    }
+
+    // Write the buffer to the block in the inode
+    FILE *file = fopen(disk->name, "r+b");
+    unsigned int seek_offset = BLOCK_SIZE*inode.start_block + BLOCK_SIZE*block_num;
+    printf("seek_offset: %d\n", seek_offset);
+    fseek(file, seek_offset, SEEK_SET);
+    fwrite(disk->buffer, 1, BLOCK_SIZE, file);
+    fclose(file);
+}
+
+void fs_buff(uint8_t buff[1024]) {
+    // Flush the current buffer
+    for (unsigned int i = 0; i < 1024; i++) {
+        disk->buffer[i] = 0;
+    }
+
+    for (unsigned int i = 0; i < 1024; i++) {
+        disk->buffer[i] = buff[i];
+    }
+
+
+    // Print buff (TEMP)
+    for (unsigned int i = 0; i < 1024; i++) {
+        printf("%02x", disk->buffer[i]);
+    }
+    printf("\n");
+}
 
 void fs_ls(void) {
     // Print the current dir and the parent dir
@@ -548,11 +635,60 @@ int main(int argc, char *argv[]) {
                 unsigned int size = str_to_uint(tokens[2], 3);
                 if (size == -1) {
                     fprintf(stderr, "Error: size\n");
+                    break;
                 }
                 // Create a name of size 5 and copy token[1] argument filling the rest of the spaces with \0 
                 char create_name[FILENAME_LENGTH] = {0};
                 strncpy(create_name, tokens[1], FILENAME_LENGTH);
                 fs_create(create_name, size);
+                break;
+            // --------------------------------
+            case 'r':
+                if (tokenCount < 2) {
+                    fprintf(stderr, "No filename given\n");
+                    break;
+                }
+                if (tokenCount < 3) {
+                    fprintf(stderr, "No block number given\n");
+                    break;
+                }
+                unsigned int block_num = str_to_uint(tokens[2], 3);
+                if (block_num == -1) {
+                    fprintf(stderr, "Error: blocknum\n");
+                    break;
+                }
+                char read_name[FILENAME_LENGTH] = {0};
+                strncpy(read_name, tokens[1], FILENAME_LENGTH);
+                fs_read(read_name, block_num);
+                break;
+            // --------------------------------
+            case 'w':
+                if (tokenCount < 2) {
+                    fprintf(stderr, "No filename given\n");
+                    break;
+                }
+                if (tokenCount < 3) {
+                    fprintf(stderr, "No block number given\n");
+                    break;
+                }
+                unsigned int write_block_num = str_to_uint(tokens[2], 3);
+                if (write_block_num == -1) {
+                    fprintf(stderr, "Error: blocknum\n");
+                    break;
+                }
+                char write_name[FILENAME_LENGTH] = {0};
+                strncpy(write_name, tokens[1], FILENAME_LENGTH);
+                fs_write(write_name, write_block_num);
+                break;
+            // --------------------------------
+            case 'b':
+                if (tokenCount < 2) {
+                    fprintf(stderr, "No buffer value was given\n");
+                    break;
+                }
+                char buff[1024] = {0};
+                strncpy(buff, tokens[1], 1024);
+                fs_buff((uint8_t *)buff);
                 break;
             // --------------------------------
             case 'l':
