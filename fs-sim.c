@@ -515,18 +515,31 @@ void fs_resize(char name[5], int new_size) {
     int current_size = inode->used_size & 0x7f;
     // If new_size is less than the current inode size
     if (new_size < current_size) {
-        // Zero out the tailing blocks
         FILE *file = fopen(disk->name, "r+b");
-        unsigned int seek_offset = BLOCK_SIZE*inode->start_block + BLOCK_SIZE*new_size;
-        uint8_t clearDisk_buff[1024] = {0};
-        for (unsigned int i = 1; i <= current_size-new_size; i++) {
-            seek_offset += BLOCK_SIZE*i;
-            printf("seek_offset: %d\n", seek_offset);
-            fseek(file, seek_offset, SEEK_SET);
-            fwrite(clearDisk_buff, 1, BLOCK_SIZE, file);
+        unsigned int seek_block_offset = BLOCK_SIZE*inode->start_block + BLOCK_SIZE*new_size;
+        unsigned int seek_freeSpaceList_offset = inode->start_block + new_size;
+        uint8_t block_zero[1024] = {0};
+        uint8_t buff[1];
+        for (unsigned int i = 0; i < current_size-new_size; i++) {
+            // Zero out the tailing blocks
+            printf("seek_offset: %d\n", seek_block_offset);
+            fseek(file, seek_block_offset, SEEK_SET);
+            fwrite(block_zero, 1, BLOCK_SIZE, file);
+            seek_block_offset += BLOCK_SIZE;
+            // Resize in the free block list
+            // GET THE BYTE, OR IT, THEN SET THE NEW VALUE
+            int byte_offset = seek_freeSpaceList_offset / 8;
+            int bit_offset = seek_freeSpaceList_offset % 8;
+            fseek(file, byte_offset, SEEK_SET);
+            fread(buff, 1, 1, file);
+            uint8_t and_mask_1 = 0xff >> (bit_offset+1);
+            uint8_t and_mask_2 = 0xff << (8-bit_offset);
+            buff[0] &= (and_mask_1 | and_mask_2);
+            printf("buff: %2x\n", buff[0]);
+            fseek(file, byte_offset, SEEK_SET);
+            fwrite(buff, 1, 1, file);
+            seek_freeSpaceList_offset += 1;
         }
-        fclose(file);
-        // Resize in the free block list
 
         // Set the inodes size to the new size
 
