@@ -383,9 +383,11 @@ void fs_read(char name[5], int block_num) {
 
     // Read the block in the inode
     FILE *file = fopen(disk->name, "rb");
-    uint8_t buff[BLOCK_SIZE] = {0};
+    uint8_t buff[BLOCK_SIZE];
+    for (int i = 0; i < BLOCK_SIZE; i++)
+        buff[i] = 0;
     unsigned int seek_offset = BLOCK_SIZE*inode.start_block + BLOCK_SIZE*block_num;
-    printf("seek_offset: %d\n", seek_offset);
+    printf("seek_offset: %d\n", seek_offset/16);
     fseek(file, seek_offset, SEEK_SET);
     fread(buff, 1, BLOCK_SIZE, file);
     fclose(file);
@@ -427,7 +429,7 @@ void fs_write(char name[5], int block_num) {
     // Write the buffer to the block in the inode
     FILE *file = fopen(disk->name, "r+b");
     unsigned int seek_offset = BLOCK_SIZE*inode.start_block + BLOCK_SIZE*block_num;
-    printf("seek_offset: %d\n", seek_offset);
+    printf("seek_offset: %d\n", seek_offset/16);
     fseek(file, seek_offset, SEEK_SET);
     fwrite(disk->buffer, 1, BLOCK_SIZE, file);
     fclose(file);
@@ -524,7 +526,9 @@ void fs_resize(char name[5], int new_size) {
         FILE *file = fopen(disk->name, "r+b");
         unsigned int seek_block_offset = BLOCK_SIZE*inode->start_block + BLOCK_SIZE*new_size;
         unsigned int seek_freeSpaceList_offset = inode->start_block + new_size;
-        uint8_t block_zero[1024] = {0};
+        uint8_t block_zero[1024];
+        for (int i = 0; i < 1024; i++)
+            block_zero[i] = 0;
         uint8_t buff[1];
         for (unsigned int i = 0; i < current_size-new_size; i++) {
             // Zero out the tailing blocks
@@ -564,11 +568,12 @@ void fs_resize(char name[5], int new_size) {
         fread(free_block_list, 1, FREE_BLOCK_LIST_SIZE, file);
         int has_space = 1;
         for (unsigned int i = 0; i < new_size-current_size; i++) {
-            int offset = inode->start_block+current_size+i;
+            int offset = inode->start_block+current_size+i+1;
+            printf("offset: %d\n", offset);
             int byte_offset = offset/8;
             int bit_offset = offset%8;
             int bit = free_block_list[byte_offset] & (0x80 >> bit_offset);
-            if (bit != 1) {
+            if (bit != 0) {
                 has_space = 0;
                 break;
             }
@@ -595,14 +600,126 @@ void fs_resize(char name[5], int new_size) {
             unsigned int seek_inode_usedSize_offset = FREE_BLOCK_LIST_SIZE + inode_index*INODE_SIZE + 5;
             fseek(file, seek_inode_usedSize_offset, SEEK_SET);
             fwrite(&inode->used_size, 1, 1, file);
-        }
-       // if not check if there is space to move
+        } else {
+            // If there is no space check if there is space in another location
+            uint8_t new_start_block = 0;
+            int contiguous_count = 0;
+            int start_bit = 1;     // Skip the first bit when starting the iterations
+            for (unsigned int i = 0; i < FREE_BLOCK_LIST_SIZE; i++) {   // Iterate through each byte
+                for (unsigned int j = start_bit; j < 8; j++) {  // Iterate throug each bit
+                    uint8_t bit = free_block_list[i] << j & 0x80;
+                    if (bit == 0) {
+                        if (contiguous_count == 0) {
+                            new_start_block = i*8 + j;
+                        }
+                        contiguous_count++;
+                    } else {
+                        contiguous_count = 0;
+                    }
+                    if (contiguous_count == new_size) {
+                        break;
+                    }
+                }
+                if (contiguous_count == new_size) {
+                    break;
+                }
+                start_bit = 0;
+            }
+            // If there is no space then return
+            if (contiguous_count != new_size) {
+                fprintf(stderr, "Error: File %.5s cannot expand to size %d\n", inode->name, new_size);
+                return;
+            }
+            // If there is space move the file to the new space
+            printf("new_start_block: %02x\n", new_start_block);
+            uint8_t block_buffer[1024];
+            uint8_t zero_buffer[1024];
+            for (int i = 0; i < 1024; i++)
+                zero_buffer[i] = 0;
+            for (int i = 0; i < current_size; i++) {
+                // Get the current block
+                unsigned int start_offset = BLOCK_SIZE*inode->start_block + BLOCK_SIZE*i;
+                fseek(file, start_offset, SEEK_SET);
+                fread(block_buffer, 1, BLOCK_SIZE, file); 
+                // Copy to the new location
+                unsigned int new_start_offset = BLOCK_SIZE*new_start_block + BLOCK_SIZE*i;
+                fseek(file, new_start_offset, SEEK_SET);
+                fwrite(block_buffer, 1, BLOCK_SIZE, file);
+                // Zero out the old location
+                fseek(file, start_offset, SEEK_SET);
+                fwrite(zero_buffer, 1, BLOCK_SIZE, file);
+            }
+            // Update the free block list
+                // Set the bits to 0
+            uint8_t buff[1];
+            for (int i = 0; i < current_size; i++) {
+                int byte_offset = (inode->start_block+i) / 8;
+                int bit_offset = (inode->start_block+i) % 8;
+                fseek(file, byte_offset, SEEK_SET);
+                fread(buff, 1, 1, file);
+                uint8_t and_mask_1 = 0xff >> (bit_offset+1);
+                uint8_t and_mask_2 = 0xff << (8-bit_offset);
+                buff[0] &= (and_mask_1 | and_mask_2);
+                printf("buff: %2x\n", buff[0]);
+                fseek(file, byte_offset, SEEK_SET);
+                fwrite(buff, 1, 1, file);
+            }
 
-       fclose(file);
+            // Update the inode by changing its start block and size
+            inode->start_block = new_start_block;
+            inode->used_size = 0x80 | new_size;
+            // Write this info to the inode in the superblock
+            unsigned int inode_offset = FREE_BLOCK_LIST_SIZE + inode_index*INODE_SIZE + 5;
+            fseek(file, inode_offset, SEEK_SET);
+            uint8_t write_buffer[2] = {inode->used_size, inode->start_block};
+            fwrite(write_buffer, 1, 2, file);
+
+            // Set the new bits to 1
+            for (int i = 0; i < new_size; i++) {
+                int byte_offset = (inode->start_block+i) / 8;
+                int bit_offset = (inode->start_block+i) % 8;
+                fseek(file, byte_offset, SEEK_SET);
+                fread(buff, 1, 1, file);
+                buff[0] |= 0x80 >> bit_offset;
+                printf("buff: %2x\n", buff[0]);
+                fseek(file, byte_offset, SEEK_SET);
+                fwrite(buff, 1, 1, file);
+            }
+        }
+        fclose(file);
     }
 }
 
-void fs_defrag(void) {}
+void fs_defrag(void) {
+    int inodes_start[FREE_BLOCK_LIST_SIZE*8];
+    for (int i = 0; i < FREE_BLOCK_LIST_SIZE*8; i++) {
+        inodes_start[i] = -1;
+    }
+    for (int i = 0; i < INODES_LENGTH; i++) {
+        inodes_start[disk->superblock->inode[i].start_block] = i;
+    }
+    Inode *inode;
+    int new_location = 1;
+    for (int i = 1; i < FREE_BLOCK_LIST_SIZE; i++) {
+        if (inodes_start[i] == -1)
+            continue;
+        int inode_startBlock = i;
+        int inode_index = inodes_start[i];
+        inode = &disk->superblock->inode[inode_index];
+        int inode_size = inode->used_size & 0x7f;
+        if (new_location == inode_startBlock) {
+            new_location += inode_size;
+            i = new_location-1;
+            continue;
+        }
+        printf("new_location: %d, inode_index: %d\n", new_location, inode_index);
+        for (int j = 0; j < inode_size; j++) {
+            i++;
+            new_location++;
+        }
+        printf("new_location: %d, inode_index: %d\n", new_location, inode_index);
+    }
+}
 
 void fs_cd(char name[5]) {
     // Skip cd into '.'
@@ -756,7 +873,9 @@ int main(int argc, char *argv[]) {
                     break;
                 }
                 // Create a name of size 5 and copy token[1] argument filling the rest of the spaces with \0 
-                char create_name[FILENAME_LENGTH] = {0};
+                char create_name[FILENAME_LENGTH];
+                for (int i = 0; i < FILENAME_LENGTH; i++)
+                    create_name[i] = 0;
                 strncpy(create_name, tokens[1], FILENAME_LENGTH);
                 fs_create(create_name, size);
                 break;
@@ -775,7 +894,9 @@ int main(int argc, char *argv[]) {
                     fprintf(stderr, "Error: blocknum\n");
                     break;
                 }
-                char read_name[FILENAME_LENGTH] = {0};
+                char read_name[FILENAME_LENGTH];
+                for (int i = 0; i < FILENAME_LENGTH; i++)
+                    read_name[i] = 0;
                 strncpy(read_name, tokens[1], FILENAME_LENGTH);
                 fs_read(read_name, block_num);
                 break;
@@ -794,7 +915,9 @@ int main(int argc, char *argv[]) {
                     fprintf(stderr, "Error: blocknum\n");
                     break;
                 }
-                char write_name[FILENAME_LENGTH] = {0};
+                char write_name[FILENAME_LENGTH];
+                for (int i = 0; i < FILENAME_LENGTH; i++)
+                    write_name[i] = 0;
                 strncpy(write_name, tokens[1], FILENAME_LENGTH);
                 fs_write(write_name, write_block_num);
                 break;
@@ -804,7 +927,9 @@ int main(int argc, char *argv[]) {
                     fprintf(stderr, "No buffer value was given\n");
                     break;
                 }
-                char buff[1024] = {0};
+                char buff[1024];
+                for (int i = 0; i < 1024; i++)
+                    buff[i] = 0;
                 strncpy(buff, tokens[1], 1024);
                 fs_buff((uint8_t *)buff);
                 break;
@@ -827,9 +952,15 @@ int main(int argc, char *argv[]) {
                     fprintf(stderr, "Error: newsize\n");
                     break;
                 }
-                char resize_name[FILENAME_LENGTH] = {0};
+                char resize_name[FILENAME_LENGTH];
+                for (int i = 0; i < FILENAME_LENGTH; i++)
+                    resize_name[i] = 0;
                 strncpy(resize_name, tokens[1], FILENAME_LENGTH);
                 fs_resize(resize_name, new_size);
+                break;
+            // --------------------------------
+            case 'o':
+                fs_defrag();
                 break;
             // --------------------------------
             case 'y':
@@ -837,7 +968,9 @@ int main(int argc, char *argv[]) {
                     fprintf(stderr, "No filename given\n");
                     break;
                 }
-                char cd_name[FILENAME_LENGTH] = {0};
+                char cd_name[FILENAME_LENGTH];
+                for (int i = 0; i < FILENAME_LENGTH; i++)
+                    cd_name[i] = 0;
                 strncpy(cd_name, tokens[1], FILENAME_LENGTH);
                 fs_cd(cd_name);
                 break;
