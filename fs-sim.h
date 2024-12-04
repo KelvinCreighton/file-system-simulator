@@ -6,7 +6,7 @@ typedef struct {
 } Inode;
 
 typedef struct {
-	char free_block_list[16];
+	uint8_t free_block_list[16];
 	Inode inode[126];
 } Superblock;
 

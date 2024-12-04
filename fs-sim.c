@@ -261,7 +261,7 @@ void fs_create(char name[5], int size) {
         }
         node = node->next;
     }
- 
+
     // If its a file, ensure there are enough available blocks by checking the superblock
     uint8_t start_block = 0;
     if (size > 0) {
@@ -293,7 +293,7 @@ void fs_create(char name[5], int size) {
             return;
         }
     }
-
+    printf("start_block: %02x\n", start_block);
     // Append the new filename to the head of the list
     Filenames_node *new_node = malloc(sizeof(Filenames_node));
     memcpy(new_node->name, name, FILENAME_LENGTH);
@@ -318,8 +318,8 @@ void fs_create(char name[5], int size) {
 
     // Write the allocated blocks to the free_block_list space if its a file
     if (size > 0) {
-        char buffer[BLOCK_SIZE];
-        fread(buffer, 1, BLOCK_SIZE, file);
+        uint8_t buffer[FREE_BLOCK_LIST_SIZE];
+        fread(buffer, 1, FREE_BLOCK_LIST_SIZE, file);
         int buffer_index = start_block/8;
         int bit_offset = start_block%8;
         for (int i = 0; i < size; i++) {
@@ -332,6 +332,10 @@ void fs_create(char name[5], int size) {
         }
         fseek(file, 0, SEEK_SET);                       // Go back to the beginning of the file
         fwrite(buffer, 1, FREE_BLOCK_LIST_SIZE, file);  // Write the buffer back with the new values
+        // Set the disk superblock free space list to match
+        for (int i = 0; i < 16; i++) {
+            disk->superblock->free_block_list[i] = buffer[i];
+        }
     }
 
     // Write the new inode to the superblock
@@ -542,11 +546,55 @@ void fs_resize(char name[5], int new_size) {
         }
 
         // Set the inodes size to the new size
-
+        inode->used_size = 0x80 | new_size;
+        printf("new size: %02x, new used size: %02x\n", new_size, inode->used_size);
+        unsigned int seek_inode_usedSize_offset = FREE_BLOCK_LIST_SIZE + inode_index*INODE_SIZE + 5;
+        fseek(file, seek_inode_usedSize_offset, SEEK_SET);
+        fwrite(&inode->used_size, 1, 1, file);
+        fclose(file);
     }
     // If new_size is greater than current inode size
     else if (new_size > current_size) {
+        // Read the free block list
+        // check if there is space to increase
+        FILE *file = fopen(disk->name, "r+b");
+        uint8_t free_block_list[FREE_BLOCK_LIST_SIZE];
+        int has_space = 1;
+        fread(free_block_list, 1, FREE_BLOCK_LIST_SIZE, file);
+        for (unsigned int i = 0; i < new_size-current_size; i++) {
+            int offset = inode->start_block+current_size+i-1;
+            int byte_offset = offset/8;
+            int bit_offset = offset%8;
+            int bit = free_block_list[byte_offset] & (0x80 >> bit_offset);
+            if (bit == 1) {
+                has_space = 0;
+                break;
+            }
+        }
+        printf("has_space: %d\n", has_space);
+        // Increase the size if there is space to
+        if (has_space) {
+            int offset = inode->start_block+current_size;
+            int buffer_index = offset/8;
+            int bit_offset = offset%8;
+            for (int i = 0; i < new_size-current_size; i++) {
+               free_block_list[buffer_index] |= 0x80 >> bit_offset;
+               bit_offset++;
+               if (bit_offset == 8) {
+                   bit_offset = 0;
+                   buffer_index++;
+               }
+            }
+            fseek(file, 0, SEEK_SET);                       // Go back to the beginning of the file
+        fwrite(free_block_list, 1, FREE_BLOCK_LIST_SIZE, file);  // Write the buffer back with the new values
+    }
+       
+                
 
+        unsigned int contiguous_count = 0;
+       // if not check if there is space to move
+
+       fclose(file);
     }
 }
 

@@ -1,4 +1,14 @@
 
 
 M disk0
-
+C file 3
+B buffervalue0
+W file 0
+B buffervalue1
+W file 1
+B buffervalue2
+W file 2
+E file 4
+W file 3
+C file2 2
+.E file 6
