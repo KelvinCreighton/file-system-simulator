@@ -354,20 +354,110 @@ void fs_create(char name[5], int size) {
 }
 
 
-void delete_children(uint8_t dir) {
+void delete_children(uint8_t dir, int killcurrent) {
     // Find if the current dir has any children
     for (unsigned int i = 0; i < INODES_LENGTH; i++) {
         int parent = disk->superblock->inode[i].dir_parent & 0x7f;
         if (parent == dir) {
-            delete_children(i);
+            delete_children(i, killcurrent);
         }
     }
 
-    printf("delete: %d, name: %.5s\n", dir, disk->superblock->inode[dir].name);
+    // Dont kill the root directory or the current directory
+    if (dir == 127 || (dir == disk->current_dir && killcurrent == 0))
+        return;
+    
+    int inode_index = dir;
+    Inode *inode = &disk->superblock->inode[inode_index];
+    uint8_t size = inode->used_size & 0x7f;
+    //printf("delete: %d, name: %.5s\n", dir, inode->name);
+    
+    FILE *file = fopen(disk->name, "r+b");
+    uint8_t zero_buff[1024];
+    for (int i = 0; i < 1024; i++) {
+        zero_buff[i] = 0;
+    }
+
+    // If its a file then delete the blocks
+    if ( (inode->dir_parent & 0x80) == 0) {
+        for (unsigned int i = 0; i < size; i++) {
+            unsigned int delete_block_offset = (inode->start_block+i)*BLOCK_SIZE;
+            fseek(file, delete_block_offset, SEEK_SET);
+            fwrite(zero_buff, 1, BLOCK_SIZE, file);
+        }
+    
+
+        uint8_t free_block_list[FREE_BLOCK_LIST_SIZE];
+        fseek(file, 0, SEEK_SET);
+        fread(free_block_list, 1, FREE_BLOCK_LIST_SIZE, file);
+        
+        // Delete the bits in the free block list
+        for (unsigned int i = inode->start_block; i < inode->start_block+size; i++) {
+            int byte_offset = i/8;
+            int bit_offset = i%8;
+            uint8_t and_mask_1 = 0xff >> (bit_offset+1);
+            uint8_t and_mask_2 = 0xff << (8-bit_offset);
+            free_block_list[byte_offset] &= (and_mask_1 | and_mask_2);
+        }
+
+        fseek(file, 0, SEEK_SET);
+        fwrite(free_block_list, 1, FREE_BLOCK_LIST_SIZE, file);
+    }
+
+    // Delete the inode
+    uint8_t zero_inode_buff[INODE_SIZE];
+    for (int i = 0; i < INODE_SIZE; i++)
+        zero_inode_buff[i] = 0;
+    unsigned int delete_inode_offset = FREE_BLOCK_LIST_SIZE + inode_index*INODE_SIZE;
+    fseek(file, delete_inode_offset, SEEK_SET);
+    fwrite(zero_inode_buff, 1, INODE_SIZE, file);
+
+    fclose(file);
+
+    // Delete the name in the filenames struct
+    int filename_index = inode->dir_parent & 0x7f;
+    Filenames_node *node = disk->filenames[filename_index];
+        // Delete the head if its the same name
+    if (strncmp_case(node->name, inode->name, 5) == 0) {
+        disk->filenames[filename_index] = node->next;
+        free(node);
+    }
+    while (node->next != NULL) {
+        /*if (strncmp_case(node->next->name, inode->name, 5) == 0) {
+            Filenames_node *tmp = node->next;
+            node->next = node->next->next;
+            free(tmp);
+        }*/
+        node = node->next;
+    }
+    
+
+    // Delete the inode from the disk struct superblock
+
 }
 
 void fs_delete(char name[5]) {
-     // Find the inode
+    printf("show filenames 1\n");
+    show_filenames();
+    if (name[0] == '.' && name[1] == '\0') {
+        delete_children(disk->current_dir, 1);
+        printf("show filenames 2\n");
+        show_filenames();
+        return;
+    }
+    
+    if (name[0] == '.' && name[1] == '.' && name[2] == '\0') {
+        if (disk->current_dir == 127) {
+            delete_children(127, 0);
+            return;
+        } else {
+            uint8_t parent_dir = disk->superblock->inode[disk->current_dir].dir_parent & 0x7f;
+            printf("parent dir: %d\n", parent_dir);
+            delete_children(parent_dir, 0);
+            return;
+        }
+    }
+    // Find the inode
     int inode_index = -1;
     Inode inode;
     for (unsigned int i = 0; i < INODES_LENGTH; i++) {
@@ -386,7 +476,7 @@ void fs_delete(char name[5]) {
     }
 
     // Recursively find its children and children of children ... until there is no more children then delete the last child and work back up
-    delete_children(inode_index);
+    delete_children(inode_index, 0);
 }
 
 void fs_read(char name[5], int block_num) {
