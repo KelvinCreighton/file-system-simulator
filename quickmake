@@ -1,5 +1,6 @@
 
-M disk0
+M disk3
 C f1 3
-C f2 3
-C f3 4
+C f2 4
+C f3 5
+

@@ -704,42 +704,71 @@ void fs_defrag(void) {
     for (int i = 0; i < 1024; i++)
         zero_buff[i] = 0;
 
+    unsigned int totalSize = 0;
+
     Inode *inode;
-    int new_location = 1;
+    int new_startBlock = 1;
     int i = 1;
     while (i < FREE_BLOCK_LIST_SIZE*8) {
         if (inodes_start[i] == -1) {
             i++;
             continue;
         }
-        int inode_startBlock = i;
+        int inode_current_startBlock = i;
         int inode_index = inodes_start[i];
         inode = &disk->superblock->inode[inode_index];
         int inode_size = inode->used_size & 0x7f;
-        if (new_location == inode_startBlock) {
-            new_location += inode_size;
+        totalSize += inode_size;
+        if (new_startBlock == inode_current_startBlock) {
+            new_startBlock += inode_size;
             i += inode_size;
             continue;
         }
-        printf("new_location: %d, inode_index: %d, inode_size: %d\n", new_location, inode_index, inode_size);
+        printf("inode_current_startBlock: %d, new_startBlock: %d, inode_index: %d, inode_size: %d\n", inode_current_startBlock, new_startBlock, inode_index, inode_size);
+        
+        // Update the inodes start block to the new location
+        inode->start_block = new_startBlock;
+        // Write this new information to the superblock at the inodes location
+        unsigned int inode_startBlock_offset = FREE_BLOCK_LIST_SIZE + inode_index*INODE_SIZE + 6;
+        fseek(file, inode_startBlock_offset, SEEK_SET);
+        fwrite(&new_startBlock, 1, 1, file);
+
         // Move the data to the new location
         uint8_t block_buff[1024];
         for (int j = 0; j < inode_size; j++) {
             // Read current block
-            unsigned int current_block_offset = (inode_startBlock + j)*BLOCK_SIZE;
+            unsigned int current_block_offset = (inode_current_startBlock + j)*BLOCK_SIZE;
+            printf("     current_block_offset: %d\n", current_block_offset/16);
             fseek(file, current_block_offset, SEEK_SET);
             fread(block_buff, 1, BLOCK_SIZE, file);
             // Write to new block
-            unsigned int new_block_offset = (new_location + j)*BLOCK_SIZE;
+            unsigned int new_block_offset = (new_startBlock + j)*BLOCK_SIZE;
+            printf("     new_block_offset %d\n", new_block_offset/16);
             fseek(file, new_block_offset, SEEK_SET);
             fwrite(block_buff, 1, BLOCK_SIZE, file);
             // Zero the current block
             fseek(file, current_block_offset, SEEK_SET);
             fwrite(zero_buff, 1, BLOCK_SIZE, file);
         }
-        new_location += inode_size;
+        new_startBlock += inode_size;
         i += inode_size;
     }
+
+    // Update the free block list
+    uint8_t free_block_list[FREE_BLOCK_LIST_SIZE];
+    free_block_list[0] = 0x80;
+    for (int i = 1; i < FREE_BLOCK_LIST_SIZE; i++)
+        free_block_list[i] = 0;
+
+    for (int i = 1; i < totalSize+1; i++) {
+        int byte_offset = i/8;
+        int bit_offset = i%8;
+        free_block_list[byte_offset] |= 0x80 >> bit_offset;
+    }
+    
+    fseek(file, 0, SEEK_SET);
+    fwrite(free_block_list, 1, FREE_BLOCK_LIST_SIZE, file);
+    fclose(file);
 }
 
 void fs_cd(char name[5]) {
