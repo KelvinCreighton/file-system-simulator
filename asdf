@@ -1,0 +1,20 @@
+M disk2
+B 1v1
+W f2 0
+B 1v2
+W f2 1
+B 1v3
+W f2 2
+B 1v4
+W f2 3
+
+B 2v1
+W f3 0
+B 2v2
+BW f3 1
+B 2v3
+W f3 2
+B 2v4
+W f3 3
+B 2v5
+W fe 4

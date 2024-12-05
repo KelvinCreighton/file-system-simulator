@@ -698,26 +698,47 @@ void fs_defrag(void) {
     for (int i = 0; i < INODES_LENGTH; i++) {
         inodes_start[disk->superblock->inode[i].start_block] = i;
     }
+
+    FILE *file = fopen(disk->name, "r+b");
+    uint8_t zero_buff[1024];
+    for (int i = 0; i < 1024; i++)
+        zero_buff[i] = 0;
+
     Inode *inode;
     int new_location = 1;
-    for (int i = 1; i < FREE_BLOCK_LIST_SIZE; i++) {
-        if (inodes_start[i] == -1)
+    int i = 1;
+    while (i < FREE_BLOCK_LIST_SIZE*8) {
+        if (inodes_start[i] == -1) {
+            i++;
             continue;
+        }
         int inode_startBlock = i;
         int inode_index = inodes_start[i];
         inode = &disk->superblock->inode[inode_index];
         int inode_size = inode->used_size & 0x7f;
         if (new_location == inode_startBlock) {
             new_location += inode_size;
-            i = new_location-1;
+            i += inode_size;
             continue;
         }
-        printf("new_location: %d, inode_index: %d\n", new_location, inode_index);
+        printf("new_location: %d, inode_index: %d, inode_size: %d\n", new_location, inode_index, inode_size);
+        // Move the data to the new location
+        uint8_t block_buff[1024];
         for (int j = 0; j < inode_size; j++) {
-            i++;
-            new_location++;
+            // Read current block
+            unsigned int current_block_offset = (inode_startBlock + j)*BLOCK_SIZE;
+            fseek(file, current_block_offset, SEEK_SET);
+            fread(block_buff, 1, BLOCK_SIZE, file);
+            // Write to new block
+            unsigned int new_block_offset = (new_location + j)*BLOCK_SIZE;
+            fseek(file, new_block_offset, SEEK_SET);
+            fwrite(block_buff, 1, BLOCK_SIZE, file);
+            // Zero the current block
+            fseek(file, current_block_offset, SEEK_SET);
+            fwrite(zero_buff, 1, BLOCK_SIZE, file);
         }
-        printf("new_location: %d, inode_index: %d\n", new_location, inode_index);
+        new_location += inode_size;
+        i += inode_size;
     }
 }
 
