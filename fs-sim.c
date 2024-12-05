@@ -353,7 +353,41 @@ void fs_create(char name[5], int size) {
     fclose(file);
 }
 
-void fs_delete(char name[5]) {}
+
+void delete_children(uint8_t dir) {
+    // Find if the current dir has any children
+    for (unsigned int i = 0; i < INODES_LENGTH; i++) {
+        int parent = disk->superblock->inode[i].dir_parent & 0x7f;
+        if (parent == dir) {
+            delete_children(i);
+        }
+    }
+
+    printf("delete: %d, name: %.5s\n", dir, disk->superblock->inode[dir].name);
+}
+
+void fs_delete(char name[5]) {
+     // Find the inode
+    int inode_index = -1;
+    Inode inode;
+    for (unsigned int i = 0; i < INODES_LENGTH; i++) {
+        inode = disk->superblock->inode[i];
+        int isParent = (inode.dir_parent & 0x7f) == disk->current_dir;
+        int sameName = strncmp_case(inode.name, name, FILENAME_LENGTH) == 0;
+        if (isParent && sameName) {
+            inode_index = i;
+            break;
+        }
+    }
+
+    if (inode_index == -1) {
+        fprintf(stderr, "Error: File %.5s does not exist\n", name);
+        return;
+    }
+
+    // Recursively find its children and children of children ... until there is no more children then delete the last child and work back up
+    delete_children(inode_index);
+}
 
 void fs_read(char name[5], int block_num) {
     // Find the inode
@@ -928,6 +962,18 @@ int main(int argc, char *argv[]) {
                     create_name[i] = 0;
                 strncpy(create_name, tokens[1], FILENAME_LENGTH);
                 fs_create(create_name, size);
+                break;
+            // --------------------------------
+            case 'd':
+                if (tokenCount < 2) {
+                    fprintf(stderr, "No file name given\n");
+                    break;
+                }
+                char delete_name[FILENAME_LENGTH];
+                for (int i = 0; i < FILENAME_LENGTH; i++)
+                    delete_name[i] = 0;
+                strncpy(delete_name, tokens[1], FILENAME_LENGTH);
+                fs_delete(delete_name);
                 break;
             // --------------------------------
             case 'r':
