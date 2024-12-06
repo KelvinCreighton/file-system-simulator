@@ -16,6 +16,7 @@ typedef struct Filenames_node {
 } Filenames_node;
 
 typedef struct {
+    int mounted;
     char *name;
     Superblock *superblock;
     uint8_t current_dir;                // Root = 127
@@ -37,3 +38,4 @@ void fs_cd(char name[5]);
 unsigned int str_to_uint(char *str, unsigned int length);
 int strncmp_case(const char *s1, const char *s2, unsigned int n);
 void trim_name(char name[5]);
+void delete_children(uint8_t dir, int killcurrent);

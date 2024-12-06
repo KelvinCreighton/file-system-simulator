@@ -71,17 +71,22 @@ void show_inode(Inode *inode) {
         
 }
 
+int nodisk = 1;
+
 void fs_mount(char *new_disk_name) {
-    disk = malloc(sizeof(Disk));
+    if (nodisk) {
+        disk = malloc(sizeof(Disk));
+        disk->mounted = 0;
+        nodisk = 0;
+    }
     FILE *file = fopen(new_disk_name, "rb");
     if (file == NULL) {
         fprintf(stderr, "Error: File '%s' does not exist.\n", new_disk_name);
         return;
     }
-    disk->name = malloc(strlen(new_disk_name)+1);
-    strcpy(disk->name, new_disk_name);
     disk->current_dir = 127;
     
+    printf("tp\n");
     // Get the superblock
     char buffer[BLOCK_SIZE];
     fread(buffer, 1, BLOCK_SIZE, file);
@@ -129,7 +134,7 @@ void fs_mount(char *new_disk_name) {
         uint8_t inode_type = inode->dir_parent & 0x80;      // Get the first bit
         uint8_t inode_parent = inode->dir_parent & 0x7F;    // Remove the first bit
         
-        show_inode(inode);
+        //show_inode(inode);
 
         // Error 1: If the state of an inode is free, then all bits in this inode must be zero
         // Otherwise, the name attribute stored in the inode must have at least one bit that is not zero
@@ -225,16 +230,20 @@ are marked in use in the free-space list must be allocated to exactly one file.
         fprintf(stderr, "Error: File system in %s is inconsistent (error code: %d)\n", new_disk_name, error_code);
         return;
     }
-    fprintf(stderr, "\nMounted: %s\n", new_disk_name);
+
+    disk->name = malloc(strlen(new_disk_name)+1);
+    strncpy(disk->name, new_disk_name, 1024);
+    disk->mounted = 1;
 }
 
 
 void fs_create(char name[5], int size) {
+    if (!disk->mounted)
+        return;
     printf("name: ");
     printf("%.5s\n", name);
     printf("size: %d\n", size);
    
-
 
     int inodeAvailable = -1;
     for (unsigned int i = 0; i < INODES_LENGTH; i++) {
@@ -264,11 +273,15 @@ void fs_create(char name[5], int size) {
     }
 
     // Read the free block list
-    FILE *free_block_list_file = fopen(disk->name, "rb");
+    FILE *file1 = fopen(disk->name, "rb");
+    if (!file1) {
+        return;
+    }
+    printf("name : %s\n", disk->name);
     uint8_t free_block_list[FREE_BLOCK_LIST_SIZE];
-    fread(free_block_list, 1, FREE_BLOCK_LIST_SIZE, free_block_list_file);
-    fclose(free_block_list_file);
-
+    fread(free_block_list, 1, FREE_BLOCK_LIST_SIZE, file1);
+        printf("asdf\n");
+    fclose(file1);
     // If its a file, ensure there are enough available blocks by checking the superblock
     uint8_t start_block = 0;
     if (size > 0) {
@@ -318,10 +331,13 @@ void fs_create(char name[5], int size) {
     disk->superblock->inode[inodeAvailable] = *inode;
     
     printf("\n");
-    show_inode(inode);
+    //show_inode(inode);
    
 
     FILE *file = fopen(disk->name, "r+b");
+    if (!file) {
+        return;
+    }
 
     // Write the allocated blocks to the free_block_list space if its a file
     if (size > 0) {
@@ -377,6 +393,8 @@ void delete_children(uint8_t dir, int killcurrent) {
     uint8_t size = inode->used_size & 0x7f;
     
     FILE *file = fopen(disk->name, "r+b");
+    if (!file)
+        return;
     uint8_t zero_buff[1024];
     for (int i = 0; i < 1024; i++) {
         zero_buff[i] = 0;
@@ -445,12 +463,14 @@ void delete_children(uint8_t dir, int killcurrent) {
 }
 
 void fs_delete(char name[5]) {
+    if (!disk->mounted)
+        return;
     printf("show filenames 1\n");
-    show_filenames();
+    //show_filenames();
     if (name[0] == '.' && name[1] == '\0') {
         delete_children(disk->current_dir, 1);
         printf("show filenames 2\n");
-        show_filenames();
+        //show_filenames();
         return;
     }
     
@@ -487,11 +507,13 @@ void fs_delete(char name[5]) {
     printf("inode index: %d\n", inode_index);
     delete_children(inode_index, 0);
 printf("show filenames 2\n");
-        show_filenames();
+        //show_filenames();
         
 }
 
 void fs_read(char name[5], int block_num) {
+    if (!disk->mounted)
+        return;
     // Find the inode
     int inode_index = -1;
     Inode inode;
@@ -519,6 +541,8 @@ void fs_read(char name[5], int block_num) {
 
     // Read the block in the inode
     FILE *file = fopen(disk->name, "rb");
+    if (!file)
+        return;
     uint8_t buff[BLOCK_SIZE];
     for (int i = 0; i < BLOCK_SIZE; i++)
         buff[i] = 0;
@@ -531,6 +555,8 @@ void fs_read(char name[5], int block_num) {
 }
 
 void fs_write(char name[5], int block_num) {
+    if (!disk->mounted)
+        return;
     if ( (name[0] == '.' && name[1] == '\0') || (name[0] == '.' && name[1] == '.' && name[2]== '\0') ) {
         fprintf(stderr, "Error: File %.5s does not exist\n", name);
         return;
@@ -564,6 +590,8 @@ void fs_write(char name[5], int block_num) {
 
     // Write the buffer to the block in the inode
     FILE *file = fopen(disk->name, "r+b");
+    if (!file)
+        return;
     unsigned int seek_offset = BLOCK_SIZE*inode.start_block + BLOCK_SIZE*block_num;
     printf("seek_offset: %d\n", seek_offset/16);
     fseek(file, seek_offset, SEEK_SET);
@@ -572,6 +600,8 @@ void fs_write(char name[5], int block_num) {
 }
 
 void fs_buff(uint8_t buff[1024]) {
+    if (!disk->mounted)
+        return;
     // Flush the current buffer
     for (unsigned int i = 0; i < 1024; i++) {
         disk->buffer[i] = 0;
@@ -590,13 +620,18 @@ void fs_buff(uint8_t buff[1024]) {
 }
 
 void fs_ls(void) {
+    if (!disk->mounted)
+        return;
     // Print the current dir and the parent dir
     unsigned int current_dir_count = 0;
     unsigned int parent_dir_count = 0;
     int parent_dir = -1;
-    if (disk->current_dir != 127)
+    if (disk->current_dir != 127) {
         parent_dir = disk->superblock->inode[disk->current_dir].dir_parent & 0x7f;
+    }
     for (unsigned int i = 0; i < INODES_LENGTH; i++) {
+        if (disk->superblock->inode[i].name[0] == '\0')
+            continue;
         if ( (disk->superblock->inode[i].dir_parent & 0x7f) == disk->current_dir) {
             current_dir_count++;
         }
@@ -633,6 +668,8 @@ void fs_ls(void) {
 }
 
 void fs_resize(char name[5], int new_size) {
+    if (!disk->mounted)
+        return;
     if ( (name[0] == '.' && name[1] == '\0') || (name[0] == '.' && name[1] == '.' && name[2]== '\0') ) {
         fprintf(stderr, "Error: File %.5s does not exist\n", name);
         return;
@@ -660,6 +697,8 @@ void fs_resize(char name[5], int new_size) {
     // If new_size is less than the current inode size
     if (new_size < current_size) {
         FILE *file = fopen(disk->name, "r+b");
+        if (!file)
+            return;
         unsigned int seek_block_offset = BLOCK_SIZE*inode->start_block + BLOCK_SIZE*new_size;
         unsigned int seek_freeSpaceList_offset = inode->start_block + new_size;
         uint8_t block_zero[1024];
@@ -700,6 +739,8 @@ void fs_resize(char name[5], int new_size) {
         // Read the free block list
         // check if there is space to increase
         FILE *file = fopen(disk->name, "r+b");
+        if (!file)
+            return;
         uint8_t free_block_list[FREE_BLOCK_LIST_SIZE];
         fread(free_block_list, 1, FREE_BLOCK_LIST_SIZE, file);
         int has_space = 1;
@@ -827,6 +868,8 @@ void fs_resize(char name[5], int new_size) {
 }
 
 void fs_defrag(void) {
+    if (!disk->mounted)
+        return;
     int inodes_start[FREE_BLOCK_LIST_SIZE*8];
     for (int i = 0; i < FREE_BLOCK_LIST_SIZE*8; i++) {
         inodes_start[i] = -1;
@@ -836,6 +879,8 @@ void fs_defrag(void) {
     }
 
     FILE *file = fopen(disk->name, "r+b");
+    if (!file)
+        return;
     uint8_t zero_buff[1024];
     for (int i = 0; i < 1024; i++)
         zero_buff[i] = 0;
@@ -908,6 +953,8 @@ void fs_defrag(void) {
 }
 
 void fs_cd(char name[5]) {
+    if (!disk->mounted)
+        return;
     // Skip cd into '.'
     if (name[0] == '.' && name[1] == '\0')
         return;
@@ -1001,6 +1048,8 @@ int main(int argc, char *argv[]) {
     }
 
     FILE *cmds = fopen(argv[1], "r");
+    if (!cmds)
+        return 1;
     if (cmds == NULL) {
         fprintf(stderr, "Error: reading cmds file\n");
         return 1;
