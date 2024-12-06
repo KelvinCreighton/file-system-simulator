@@ -154,11 +154,11 @@ void fs_mount(char *new_disk_name) {
 
         // Error 2: The start block of every inode pertaining to a file (i.e. when the directory bit is not set) must have a value between 1 and 127 inclusive
         // Moreover, the size of every inode pertaining to a file must be such that its last block is also between 1 and 127
-        if (inode->start_block < 1 || inode->start_block > 127) {
+        if (inode_type == 0 && (inode->start_block < 1 || inode->start_block > 127)) {
             error_code = 2;
             break;
         }
-        if (inode->start_block+inode_size-1 > 127) {
+        if (inode_type == 0 && inode->start_block+inode_size-1 > 127) {
             error_code = 2;
             break;
         }
@@ -215,17 +215,55 @@ void fs_mount(char *new_disk_name) {
         memcpy(new_node->name, inode->name, FILENAME_LENGTH); 
         new_node->next = disk->filenames[inode_parent];
         disk->filenames[inode_parent] = new_node;
-   }
+       
+    }
+   
+
+
+    // Error 6: Blocks that are marked free in the free-space list cannot be allocated to any file
+    // Similarly, blocks that are marked in use in the free-space list must be allocated to exactly one file.
+
+    // Build a temp free block list with the inodes to compare with the real block list
+    uint8_t compare_freeBlockList[FREE_BLOCK_LIST_SIZE];
+    compare_freeBlockList[0] = 0x80;
+    for (int i = 1; i < FREE_BLOCK_LIST_SIZE;i ++)
+        compare_freeBlockList[i] = 0;
+
+    Inode tmp_inode;
+    for (int i = 0; i < INODES_LENGTH; i++) {
+        tmp_inode = disk->superblock->inode[i];
+        if (tmp_inode.name[0] == '\0')
+            continue;
+        if ( (tmp_inode.dir_parent & 0x80) != 0)
+            continue;
+
+        int tmp_inodeSize = tmp_inode.used_size & 0x7f;
+        for (int j = 0; j < tmp_inodeSize; j++) {
+            int offset = tmp_inode.start_block + j;
+            int byte_offset = offset / 8;
+            int bit_offset = offset % 8;
+            int bit = 0x80 >> bit_offset;
+            compare_freeBlockList[byte_offset] |= bit;
+        }
+    }
+
+    printf("compare: ");
+    for (int i = 0; i < 16; i++)
+        printf("%x", compare_freeBlockList[i]);
+
+    for (int i = 0; i < FREE_BLOCK_LIST_SIZE; i++) {
+        if (disk->superblock->free_block_list[i] != compare_freeBlockList[i]) {
+            error_code = 6;
+            break;
+        }
+    }
+
+        
     
     printf("\n");
     show_filenames();
-    /*
-     * 
 
-6. Blocks that are marked free in the free-space list cannot be allocated to any file. Similarly, blocks that
-are marked in use in the free-space list must be allocated to exactly one file.
-*/
-    if (error_code > 0) {
+   if (error_code > 0) {
         fprintf(stderr, "Error: File system in %s is inconsistent (error code: %d)\n", new_disk_name, error_code);
         return;
     }
