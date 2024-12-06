@@ -437,7 +437,7 @@ void delete_children(uint8_t dir, int killcurrent) {
     
 
     // Delete the inode from the disk struct superblock
-    free(inode);
+    inode = NULL;
 }
 
 void fs_delete(char name[5]) {
@@ -1120,10 +1120,30 @@ int main(int argc, char *argv[]) {
                     fprintf(stderr, "No buffer value was given\n");
                     break;
                 }
+                // Combine the rest of the tokens into one string
+                printf("token Count: %d\n", tokenCount);
                 char buff[1024];
-                for (int i = 0; i < 1024; i++)
-                    buff[i] = 0;
-                strncpy(buff, tokens[1], 1024);
+                int tokenIndex = 1;
+                int tokenCharIndex = 0;
+                int inputSpace = 0;
+                for (int i = 0; i < 1024; i++) {
+                    if (tokenIndex > tokenCount-1) {
+                        buff[i] = 0;
+                    } else {
+                        if (inputSpace) {
+                            buff[i] = ' ';
+                            inputSpace = 0;
+                        } else {
+                            buff[i] = tokens[tokenIndex][tokenCharIndex];
+                            tokenCharIndex++;
+                            if (tokens[tokenIndex][tokenCharIndex] == '\0') {
+                                tokenIndex++;
+                                tokenCharIndex = 0;
+                                inputSpace = 1;
+                            }
+                        }
+                    }
+                }
                 fs_buff((uint8_t *)buff);
                 break;
             // --------------------------------
