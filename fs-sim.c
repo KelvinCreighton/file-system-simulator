@@ -13,63 +13,7 @@
 
 Disk *disk;
 
-void show_filenames() {
-    printf("---- filenames ----\n");
-    Filenames_node *node;
-    for (unsigned int i = 0; i < INODES_LENGTH+2; i++) {
-        node = disk->filenames[i];
-        if (disk->filenames[i] == NULL)
-            continue;
-        printf("[%03d]->", i);
-        while (node != NULL) {
-            printf("[");
-            for (unsigned int j = 0; j < FILENAME_LENGTH; j++) {
-                if (node->name[j] == '\0') {
-                    printf("\\0");
-                } else {
-                    printf("%c", node->name[j]);
-                }
-            }
-            printf("]->");
-            node = node->next;
-        }
-        printf("[NULL]\n");
-    }
-}
 
-void show_inode(Inode *inode) {
-        uint8_t inode_state = inode->used_size & 0x80;      // Get the first bit
-        uint8_t inode_size = inode->used_size & 0x7F;       // Remove the first bit
-        uint8_t inode_type = inode->dir_parent & 0x80;      // Get the first bit
-        uint8_t inode_parent = inode->dir_parent & 0x7F;    // Remove the first bit
-        
-        printf("inode_name: ");
-        for (int j = 0; j < 5; j++) {
-            char letter = inode->name[j];
-            if (letter == '\0')
-               printf("\\%x", letter);
-            else
-                printf("%c", letter);
-        }
-        printf("\n");
-        printf("inode_usedSize: %02x\n", inode->used_size);
-        printf("inode_state: %02x", inode_state);
-        if (inode_state != 0)
-            printf(" (in use)\n");
-        else
-            printf(" (free)\n");
-        printf("inode_size: %02x\n", inode_size);
-        printf("inode_startBlock: %02x\n", inode->start_block);
-        printf("end block: %d\n", inode->start_block+inode_size-1);
-        printf("inode_dirParent: %02x\n", inode->dir_parent);
-        printf("inode_type: %02x", inode_type);
-        if (inode_type != 0)
-            printf(" (dir)\n");
-        else
-            printf(" (file)\n");
-        printf("inode_parent: %02x\n", inode_parent);
-        
-}
 
 int nodisk = 1;
 
@@ -126,7 +70,6 @@ void fs_mount(char *new_disk_name) {
         if (name_is_0 && inode->used_size == 0 && inode->start_block == 0 && inode->dir_parent == 0) {
             continue;
         }
-        printf("\n---- i = %d ----\n", i);
         
         uint8_t inode_state = inode->used_size & 0x80;      // Get the first bit
         uint8_t inode_size = inode->used_size & 0x7F;       // Remove the first bit
@@ -179,20 +122,6 @@ void fs_mount(char *new_disk_name) {
             unsigned int parent_inode_offset = FREE_BLOCK_LIST_SIZE + inode_parent*INODE_SIZE;
             uint8_t parent_inode_state = *(uint8_t *)(buffer + parent_inode_offset + FILENAME_LENGTH) & 0x80;
             uint8_t parent_inode_type = *(uint8_t *)(buffer + parent_inode_offset + FILENAME_LENGTH+2) & 0x80;
-
-            // -----------------------------
-            printf("\n");
-            printf("parent_inode_state: %02x", parent_inode_state);
-            if (parent_inode_state != 0)
-                printf(" (in use)\n");
-            else
-                printf(" (free)\n");
-            printf("parent_inode_type: %02x", parent_inode_type); 
-            if (parent_inode_type != 0)
-                printf(" (dir)\n");
-            else
-                printf(" (file)\n");
-            // -----------------------------
 
             if (parent_inode_state == 0 || parent_inode_type == 0) {
                 error_code = 4;
@@ -247,9 +176,6 @@ void fs_mount(char *new_disk_name) {
         }
     }
 
-    printf("compare: ");
-    for (int i = 0; i < 16; i++)
-        printf("%x", compare_freeBlockList[i]);
 
     for (int i = 0; i < FREE_BLOCK_LIST_SIZE; i++) {
         if (disk->superblock->free_block_list[i] != compare_freeBlockList[i]) {
@@ -260,8 +186,6 @@ void fs_mount(char *new_disk_name) {
 
         
     
-    printf("\n");
-    show_filenames();
 
    if (error_code > 0) {
         fprintf(stderr, "Error: File system in %s is inconsistent (error code: %d)\n", new_disk_name, error_code);
@@ -277,10 +201,6 @@ void fs_mount(char *new_disk_name) {
 void fs_create(char name[5], int size) {
     if (!disk->mounted)
         return;
-    printf("name: ");
-    printf("%.5s\n", name);
-    printf("size: %d\n", size);
-   
 
     int inodeAvailable = -1;
     for (unsigned int i = 0; i < INODES_LENGTH; i++) {
@@ -314,10 +234,8 @@ void fs_create(char name[5], int size) {
     if (!file1) {
         return;
     }
-    printf("name : %s\n", disk->name);
     uint8_t free_block_list[FREE_BLOCK_LIST_SIZE];
     fread(free_block_list, 1, FREE_BLOCK_LIST_SIZE, file1);
-        printf("asdf\n");
     fclose(file1);
     // If its a file, ensure there are enough available blocks by checking the superblock
     uint8_t start_block = 0;
@@ -350,7 +268,6 @@ void fs_create(char name[5], int size) {
             return;
         }
     }
-    printf("start_block: %02x\n", start_block);
     // Append the new filename to the head of the list
     Filenames_node *new_node = malloc(sizeof(Filenames_node));
     memcpy(new_node->name, name, FILENAME_LENGTH);
@@ -367,9 +284,6 @@ void fs_create(char name[5], int size) {
         inode->dir_parent |= 0x80;  // State it as a directory in the dir_parent variable
     disk->superblock->inode[inodeAvailable] = *inode;
     
-    printf("\n");
-    //show_inode(inode);
-   
 
     FILE *file = fopen(disk->name, "r+b");
     if (!file) {
@@ -409,18 +323,15 @@ void fs_create(char name[5], int size) {
 
 
 void delete_children(uint8_t dir, int killcurrent) {
-    printf("dir before: %d\n", dir);
     // Find if the current dir has any children
     for (unsigned int i = 0; i < INODES_LENGTH; i++) {
         if (disk->superblock->inode[i].name[0] == 0)
             continue;
         int parent = disk->superblock->inode[i].dir_parent & 0x7f;
         if (parent == dir) {
-            printf("i: %d\n", i);
             delete_children(i, killcurrent);
         }
     }
-    printf("dir after %d\n", dir);
     // Dont kill the root directory or the current directory
     if (dir == 127 || (dir == disk->current_dir && killcurrent == 0))
         return;
@@ -476,13 +387,11 @@ void delete_children(uint8_t dir, int killcurrent) {
     // Delete the name in the filenames struct
     int filename_index = inode->dir_parent & 0x7f;
     Filenames_node *node = disk->filenames[filename_index];
-    printf("node name: %.5s, inode name: %.5s\n", node->name, inode->name);
         // Delete the head if its the same name
     if (strncmp_case(node->name, inode->name, 5) == 0) {
         disk->filenames[filename_index] = node->next;
         free(node);
     } else {
-        printf("next name: %.5s\n", node->next->name);
         while (node->next != NULL) {
             if (strncmp_case(node->next->name, inode->name, 5) == 0) {
                 Filenames_node *tmp = node->next;
@@ -502,11 +411,9 @@ void delete_children(uint8_t dir, int killcurrent) {
 void fs_delete(char name[5]) {
     if (!disk->mounted)
         return;
-    printf("show filenames 1\n");
     //show_filenames();
     if (name[0] == '.' && name[1] == '\0') {
         delete_children(disk->current_dir, 1);
-        printf("show filenames 2\n");
         //show_filenames();
         return;
     }
@@ -517,7 +424,6 @@ void fs_delete(char name[5]) {
             return;
         } else {
             uint8_t parent_dir = disk->superblock->inode[disk->current_dir].dir_parent & 0x7f;
-            printf("parent dir: %d\n", parent_dir);
             delete_children(parent_dir, 0);
             return;
         }
@@ -541,10 +447,7 @@ void fs_delete(char name[5]) {
     }
 
     // Recursively find its children and children of children ... until there is no more children then delete the last child and work back up
-    printf("inode index: %d\n", inode_index);
     delete_children(inode_index, 0);
-printf("show filenames 2\n");
-        //show_filenames();
         
 }
 
@@ -568,8 +471,6 @@ void fs_read(char name[5], int block_num) {
         return;
     }
     
-    printf("used size: %02x\n", inode.used_size & 0x7f);
-    printf("block_num: %d\n", block_num);
     // Find the block in the inode
     if (block_num > (inode.used_size & 0x7f)-1) {
         fprintf(stderr, "Error: %.5s does not have block %d\n", name, block_num);
@@ -584,7 +485,6 @@ void fs_read(char name[5], int block_num) {
     for (int i = 0; i < BLOCK_SIZE; i++)
         buff[i] = 0;
     unsigned int seek_offset = BLOCK_SIZE*inode.start_block + BLOCK_SIZE*block_num;
-    printf("seek_offset: %d\n", seek_offset/16);
     fseek(file, seek_offset, SEEK_SET);
     fread(buff, 1, BLOCK_SIZE, file);
     fclose(file);
@@ -617,8 +517,6 @@ void fs_write(char name[5], int block_num) {
         return;
     }
     
-    printf("used size: %02x\n", inode.used_size & 0x7f);
-    printf("block_num: %d\n", block_num);
     // Find the block in the inode
     if (block_num > (inode.used_size & 0x7f)-1) {
         fprintf(stderr, "Error: %.5s does not have block %d\n", name, block_num);
@@ -630,7 +528,6 @@ void fs_write(char name[5], int block_num) {
     if (!file)
         return;
     unsigned int seek_offset = BLOCK_SIZE*inode.start_block + BLOCK_SIZE*block_num;
-    printf("seek_offset: %d\n", seek_offset/16);
     fseek(file, seek_offset, SEEK_SET);
     fwrite(disk->buffer, 1, BLOCK_SIZE, file);
     fclose(file);
@@ -647,13 +544,6 @@ void fs_buff(uint8_t buff[1024]) {
     for (unsigned int i = 0; i < 1024; i++) {
         disk->buffer[i] = buff[i];
     }
-
-
-    // Print buff (TEMP)
-    for (unsigned int i = 0; i < 1024; i++) {
-        printf("%02x", disk->buffer[i]);
-    }
-    printf("\n");
 }
 
 void fs_ls(void) {
@@ -744,7 +634,6 @@ void fs_resize(char name[5], int new_size) {
         uint8_t buff[1];
         for (unsigned int i = 0; i < current_size-new_size; i++) {
             // Zero out the tailing blocks
-            printf("seek_offset: %d\n", seek_block_offset);
             fseek(file, seek_block_offset, SEEK_SET);
             fwrite(block_zero, 1, BLOCK_SIZE, file);
             seek_block_offset += BLOCK_SIZE;
@@ -757,7 +646,6 @@ void fs_resize(char name[5], int new_size) {
             uint8_t and_mask_1 = 0xff >> (bit_offset+1);
             uint8_t and_mask_2 = 0xff << (8-bit_offset);
             buff[0] &= (and_mask_1 | and_mask_2);
-            printf("buff: %2x\n", buff[0]);
             fseek(file, byte_offset, SEEK_SET);
             fwrite(buff, 1, 1, file);
             seek_freeSpaceList_offset += 1;
@@ -765,7 +653,6 @@ void fs_resize(char name[5], int new_size) {
 
         // Set the inodes size to the new size
         inode->used_size = 0x80 | new_size;
-        printf("new size: %02x, new used size: %02x\n", new_size, inode->used_size);
         unsigned int seek_inode_usedSize_offset = FREE_BLOCK_LIST_SIZE + inode_index*INODE_SIZE + 5;
         fseek(file, seek_inode_usedSize_offset, SEEK_SET);
         fwrite(&inode->used_size, 1, 1, file);
@@ -783,7 +670,6 @@ void fs_resize(char name[5], int new_size) {
         int has_space = 1;
         for (unsigned int i = 0; i < new_size-current_size; i++) {
             int offset = inode->start_block+current_size+i+1;
-            printf("offset: %d\n", offset);
             int byte_offset = offset/8;
             int bit_offset = offset%8;
             int bit = free_block_list[byte_offset] & (0x80 >> bit_offset);
@@ -792,7 +678,6 @@ void fs_resize(char name[5], int new_size) {
                 break;
             }
         }
-        printf("has_space: %d\n", has_space);
         // Increase the size if there is space to
         if (has_space) {
             int offset = inode->start_block+current_size;
@@ -810,7 +695,6 @@ void fs_resize(char name[5], int new_size) {
             fwrite(free_block_list, 1, FREE_BLOCK_LIST_SIZE, file);  // Write the buffer back with the new values
             // Set the inode to the new size
             inode->used_size = 0x80 | new_size;
-            printf("new size: %02x, new used size: %02x\n", new_size, inode->used_size);
             unsigned int seek_inode_usedSize_offset = FREE_BLOCK_LIST_SIZE + inode_index*INODE_SIZE + 5;
             fseek(file, seek_inode_usedSize_offset, SEEK_SET);
             fwrite(&inode->used_size, 1, 1, file);
@@ -845,7 +729,6 @@ void fs_resize(char name[5], int new_size) {
                 return;
             }
             // If there is space move the file to the new space
-            printf("new_start_block: %02x\n", new_start_block);
             uint8_t block_buffer[1024];
             uint8_t zero_buffer[1024];
             for (int i = 0; i < 1024; i++)
@@ -874,7 +757,6 @@ void fs_resize(char name[5], int new_size) {
                 uint8_t and_mask_1 = 0xff >> (bit_offset+1);
                 uint8_t and_mask_2 = 0xff << (8-bit_offset);
                 buff[0] &= (and_mask_1 | and_mask_2);
-                printf("buff: %2x\n", buff[0]);
                 fseek(file, byte_offset, SEEK_SET);
                 fwrite(buff, 1, 1, file);
             }
@@ -895,7 +777,6 @@ void fs_resize(char name[5], int new_size) {
                 fseek(file, byte_offset, SEEK_SET);
                 fread(buff, 1, 1, file);
                 buff[0] |= 0x80 >> bit_offset;
-                printf("buff: %2x\n", buff[0]);
                 fseek(file, byte_offset, SEEK_SET);
                 fwrite(buff, 1, 1, file);
             }
@@ -942,7 +823,6 @@ void fs_defrag(void) {
             i += inode_size;
             continue;
         }
-        printf("inode_current_startBlock: %d, new_startBlock: %d, inode_index: %d, inode_size: %d\n", inode_current_startBlock, new_startBlock, inode_index, inode_size);
         
         // Update the inodes start block to the new location
         inode->start_block = new_startBlock;
@@ -956,12 +836,10 @@ void fs_defrag(void) {
         for (int j = 0; j < inode_size; j++) {
             // Read current block
             unsigned int current_block_offset = (inode_current_startBlock + j)*BLOCK_SIZE;
-            printf("     current_block_offset: %d\n", current_block_offset/16);
             fseek(file, current_block_offset, SEEK_SET);
             fread(block_buff, 1, BLOCK_SIZE, file);
             // Write to new block
             unsigned int new_block_offset = (new_startBlock + j)*BLOCK_SIZE;
-            printf("     new_block_offset %d\n", new_block_offset/16);
             fseek(file, new_block_offset, SEEK_SET);
             fwrite(block_buff, 1, BLOCK_SIZE, file);
             // Zero the current block
@@ -978,7 +856,7 @@ void fs_defrag(void) {
     for (int i = 1; i < FREE_BLOCK_LIST_SIZE; i++)
         free_block_list[i] = 0;
 
-    for (int i = 1; i < totalSize+1; i++) {
+    for (int i = 1; i < totalSize; i++) {
         int byte_offset = i/8;
         int bit_offset = i%8;
         free_block_list[byte_offset] |= 0x80 >> bit_offset;
@@ -1013,7 +891,6 @@ void fs_cd(char name[5]) {
         int sameName = strncmp_case(inode->name, name, FILENAME_LENGTH) == 0;
         if (isParent && sameName) {
            disk->current_dir = i;
-           printf("new dir: %d\n", i);
            return;
         }
     }
@@ -1077,7 +954,6 @@ int strncmp_case(const char *s1, const char *s2, unsigned int n) {
 }
 
 int main(int argc, char *argv[]) {
-    printf("================\n\n");
 
     if (argc < 2) {
         fprintf(stderr, "Error: No cmds file given\n");
@@ -1103,14 +979,11 @@ int main(int argc, char *argv[]) {
         char *tokens[1024];
         char *token = strtok(buffer, " ");
         int tokenCount = 0;
-        printf("tokens: ");
         while (token != NULL) {
-            printf("%s, ", token);
             tokens[tokenCount] = token;
             token = strtok(NULL, " ");
             tokenCount++;
         }
-        printf("\n");
         // Return error if the first token (command) is not exactly one character in length
         if (tokens[0][1] != '\0') {
             fprintf(stderr, "Error: unknown command\n");
@@ -1212,7 +1085,6 @@ int main(int argc, char *argv[]) {
                     break;
                 }
                 // Combine the rest of the tokens into one string
-                printf("token Count: %d\n", tokenCount);
                 char buff[1024];
                 int tokenIndex = 1;
                 int tokenCharIndex = 0;
@@ -1284,7 +1156,6 @@ int main(int argc, char *argv[]) {
         }
 
 
-        printf("------------\n");
     }
 
     fclose(cmds);

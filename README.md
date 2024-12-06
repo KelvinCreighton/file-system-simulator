@@ -7,10 +7,6 @@
 # - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
 
 
-- tbh this assignment was too much
-- and the ideas in this assignment were definitly not taught. like not really...
-
-
 Syscalls:
     
     - in my script i used the fopen, fread, fwrite, fseek, fclose library functions which call the file read and write ... etc system calls

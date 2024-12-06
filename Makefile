@@ -1,16 +1,20 @@
 CC = gcc
-CFLAGS = -Wall -pthread -g
-OBJ = fs-sim.o
+CFLAGS = -Wall -Werror -pthread -g
 
+SRC = fs-sim.c
+OBJ = fs-sim.o
 EXEC = fs
 
 all: $(EXEC)
 
-fs-sim.o: fs-sim.c
-	$(CC) $(CFLAGS) -c fs-sim.c -o fs-sim.o
-
 fs: $(OBJ)
 	$(CC) $(CFLAGS) $(OBJ) -o $(EXEC)
 
+compile: $(OBJ)
+
+$(OBJ): $(SRC)
+	$(CC) $(CFLAGS) -c $(SRC) -o $(OBJ)
+
 clean:
 	rm -f $(OBJ) $(EXEC)
+
