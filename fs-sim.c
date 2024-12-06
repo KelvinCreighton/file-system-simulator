@@ -91,6 +91,7 @@ void fs_mount(char *new_disk_name) {
     Superblock *superblock = malloc(sizeof(Superblock));
     memcpy(superblock->free_block_list, buffer, FREE_BLOCK_LIST_SIZE);
     disk->superblock = superblock;
+   
     // Set the pointer for all filenames_node in each directory to null
     for (unsigned int i = 0; i < INODES_LENGTH+1; i++) {
         disk->filenames[i] = NULL;
@@ -355,14 +356,18 @@ void fs_create(char name[5], int size) {
 
 
 void delete_children(uint8_t dir, int killcurrent) {
+    printf("dir before: %d\n", dir);
     // Find if the current dir has any children
     for (unsigned int i = 0; i < INODES_LENGTH; i++) {
+        if (disk->superblock->inode[i].name[0] == 0)
+            continue;
         int parent = disk->superblock->inode[i].dir_parent & 0x7f;
         if (parent == dir) {
+            printf("i: %d\n", i);
             delete_children(i, killcurrent);
         }
     }
-
+    printf("dir after %d\n", dir);
     // Dont kill the root directory or the current directory
     if (dir == 127 || (dir == disk->current_dir && killcurrent == 0))
         return;
@@ -370,7 +375,6 @@ void delete_children(uint8_t dir, int killcurrent) {
     int inode_index = dir;
     Inode *inode = &disk->superblock->inode[inode_index];
     uint8_t size = inode->used_size & 0x7f;
-    //printf("delete: %d, name: %.5s\n", dir, inode->name);
     
     FILE *file = fopen(disk->name, "r+b");
     uint8_t zero_buff[1024];
@@ -480,6 +484,7 @@ void fs_delete(char name[5]) {
     }
 
     // Recursively find its children and children of children ... until there is no more children then delete the last child and work back up
+    printf("inode index: %d\n", inode_index);
     delete_children(inode_index, 0);
 printf("show filenames 2\n");
         show_filenames();
@@ -602,8 +607,8 @@ void fs_ls(void) {
     if (parent_dir == -1)
         parent_dir_count = current_dir_count;
 
-    printf(".     %3d\n", current_dir_count);
-    printf("..    %3d\n", parent_dir_count);
+    printf(".     %3d\n", current_dir_count+2);
+    printf("..    %3d\n", parent_dir_count+2);
     
 
 
