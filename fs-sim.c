@@ -86,7 +86,6 @@ void fs_mount(char *new_disk_name) {
     }
     disk->current_dir = 127;
     
-    printf("tp\n");
     // Get the superblock
     char buffer[BLOCK_SIZE];
     fread(buffer, 1, BLOCK_SIZE, file);
@@ -231,8 +230,8 @@ are marked in use in the free-space list must be allocated to exactly one file.
         return;
     }
 
-    disk->name = malloc(strlen(new_disk_name)+1);
-    strncpy(disk->name, new_disk_name, 1024);
+    disk->name = calloc(strlen(new_disk_name)+1, sizeof(char));
+    strcpy(disk->name, new_disk_name);
     disk->mounted = 1;
 }
 
