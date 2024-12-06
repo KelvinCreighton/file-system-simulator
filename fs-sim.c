@@ -417,23 +417,27 @@ void delete_children(uint8_t dir, int killcurrent) {
     // Delete the name in the filenames struct
     int filename_index = inode->dir_parent & 0x7f;
     Filenames_node *node = disk->filenames[filename_index];
+    printf("node name: %.5s, inode name: %.5s\n", node->name, inode->name);
         // Delete the head if its the same name
     if (strncmp_case(node->name, inode->name, 5) == 0) {
         disk->filenames[filename_index] = node->next;
         free(node);
-    }
-    while (node->next != NULL) {
-        /*if (strncmp_case(node->next->name, inode->name, 5) == 0) {
-            Filenames_node *tmp = node->next;
-            node->next = node->next->next;
-            free(tmp);
-        }*/
-        node = node->next;
+    } else {
+        printf("next name: %.5s\n", node->next->name);
+        while (node->next != NULL) {
+            if (strncmp_case(node->next->name, inode->name, 5) == 0) {
+                Filenames_node *tmp = node->next;
+                node->next = node->next->next;
+                free(tmp);
+                break;
+            }
+            node = node->next;
+        }
     }
     
 
     // Delete the inode from the disk struct superblock
-
+    free(inode);
 }
 
 void fs_delete(char name[5]) {
@@ -477,6 +481,9 @@ void fs_delete(char name[5]) {
 
     // Recursively find its children and children of children ... until there is no more children then delete the last child and work back up
     delete_children(inode_index, 0);
+printf("show filenames 2\n");
+        show_filenames();
+        
 }
 
 void fs_read(char name[5], int block_num) {
@@ -1169,6 +1176,7 @@ int main(int argc, char *argv[]) {
         printf("------------\n");
     }
 
-    fclose(cmds);     
+    fclose(cmds);
+
     return 0;
 }
