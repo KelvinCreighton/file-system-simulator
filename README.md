@@ -1,3 +1,4 @@
+<<<<<<< HEAD
 
 
 # - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
@@ -31,3 +32,6 @@ Sources used:
     - stack overflow for the fopen and fclose for file reading since these library functions are similar but slightly different than what i know
     - the assignment for structure
     - thats pretty much it yall didnt really give any resources or help for this assignment...
+=======
+# file-system-simulator
+>>>>>>> cf28f4a5918471c1b72bf52820167766025cb5d7
